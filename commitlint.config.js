@@ -18,7 +18,7 @@ const SCOPES = [
 
 const AI_ATTRIBUTION_PATTERNS = [
   /co-authored-by:\s*[^\n]*(claude|anthropic|copilot|openai|chatgpt|codex|cursor|gemini|antigravity|aider|devin|windsurf|codeium|noreply@anthropic\.com|noreply@openai\.com)/i,
-  /generated\s+(with|by)\s+[^\n]*(claude|anthropic|copilot|openai|chatgpt|codex|cursor|gemini|antigravity|ai)/i,
+  /generated\s+(with|by)\s+[^\n]*\b(claude|anthropic|copilot|openai|chatgpt|codex|cursor|gemini|antigravity|ai)\b/i,
   /🤖/u,
 ];
 

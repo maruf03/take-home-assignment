@@ -161,6 +161,49 @@ describe('[I8] server config', () => {
     );
   });
 
+  it('[I8] refuses dev-default secrets in multi-host, Unix-socket, and malformed-escape Postgres URLs under production', () => {
+    expect(() =>
+      defineServerConfig(testSchema, {
+        env: {
+          ...safeProdEnv,
+          DATABASE_URL: 'postgresql://app:dev-app@pg1:5432,pg2:5432/lomi',
+        },
+      }),
+    ).toThrow(/DATABASE_URL/);
+
+    expect(() =>
+      defineServerConfig(testSchema, {
+        env: {
+          ...safeProdEnv,
+          DATABASE_URL: 'postgresql://app:dev-app@/lomi?host=/var/run/postgresql',
+        },
+      }),
+    ).toThrow(/DATABASE_URL/);
+
+    expect(() =>
+      defineServerConfig(testSchema, {
+        env: {
+          ...safeProdEnv,
+          DATABASE_URL: 'postgresql://dev-app:p%ZZ@pg.internal:5432/lomi',
+        },
+      }),
+    ).toThrow(/DATABASE_URL/);
+  });
+
+  it('[I8] refuses uppercase test-only LLM providers outside APP_ENV=test', () => {
+    const looseProviderSchema = z.object({
+      LLM_PROVIDER: z.string(),
+    });
+    expect(() =>
+      defineServerConfig(looseProviderSchema, {
+        env: {
+          APP_ENV: '',
+          LLM_PROVIDER: 'FAKE',
+        },
+      }),
+    ).toThrow(ConfigError);
+  });
+
   it('[I8] default logger warns only once across repeated calls in non-production', () => {
     resetDevDefaultWarningForTests();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

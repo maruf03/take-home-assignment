@@ -1,21 +1,24 @@
+import { builtinModules } from 'node:module';
 import js from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import importX from 'eslint-plugin-import-x';
 import tseslint from 'typescript-eslint';
 
+const BARE_NODE_BUILTINS = builtinModules
+  .filter((name) => !name.startsWith('node:'))
+  .flatMap((name) => [name, `${name}/*`]);
+
+const NODE_BUILTIN_PATTERNS = ['node:*', ...BARE_NODE_BUILTINS];
+
+const CORE_FORBIDDEN_WORKSPACE_DIRS = ['config', 'db', 'storage', 'pdf', 'llm', 'testkit'];
+const WEB_FORBIDDEN_WORKSPACE_DIRS = ['config', 'core', 'db', 'storage', 'pdf', 'llm', 'testkit'];
+
 const CORE_FORBIDDEN_PACKAGES = [
-  '@app/config',
-  '@app/config/*',
-  '@app/db',
-  '@app/db/*',
-  '@app/storage',
-  '@app/storage/*',
-  '@app/pdf',
-  '@app/pdf/*',
-  '@app/llm',
-  '@app/llm/*',
-  '@app/testkit',
-  '@app/testkit/*',
+  '@app/*',
+  '!@app/contracts',
+  '!@app/contracts/*',
+  ...CORE_FORBIDDEN_WORKSPACE_DIRS.flatMap((dir) => [`**/packages/${dir}/**`, `../../${dir}/**`]),
+  '**/apps/**',
   '@nestjs/*',
   'drizzle-orm',
   'drizzle-orm/*',
@@ -29,37 +32,25 @@ const CORE_FORBIDDEN_PACKAGES = [
   'pdfjs-dist',
   'pdfjs-dist/*',
   'tinypool',
-  'node:*',
-  'fs',
-  'path',
-  'crypto',
-  'child_process',
-  'http',
-  'https',
-  'net',
-  'os',
-  'process',
-  'stream',
-  'url',
-  'worker_threads',
+  ...NODE_BUILTIN_PATTERNS,
 ];
 
 const WEB_FORBIDDEN_PACKAGES = [
-  '@app/config',
-  '@app/config/*',
-  '@app/core',
-  '@app/core/*',
-  '@app/db',
-  '@app/db/*',
-  '@app/storage',
-  '@app/storage/*',
-  '@app/pdf',
-  '@app/pdf/*',
-  '@app/llm',
-  '@app/llm/*',
-  '@app/testkit',
-  '@app/testkit/*',
-  'node:*',
+  '@app/*',
+  '!@app/contracts',
+  '!@app/contracts/*',
+  ...WEB_FORBIDDEN_WORKSPACE_DIRS.flatMap((dir) => [`**/packages/${dir}/**`, `../../${dir}/**`]),
+  '**/apps/api/**',
+  '**/apps/worker/**',
+  ...NODE_BUILTIN_PATTERNS,
+];
+
+const CONTRACTS_FORBIDDEN_PACKAGES = [
+  '@app/*',
+  ...WEB_FORBIDDEN_WORKSPACE_DIRS.flatMap((dir) => [`**/packages/${dir}/**`, `../../${dir}/**`]),
+  '**/apps/**',
+  '@nestjs/*',
+  ...NODE_BUILTIN_PATTERNS,
 ];
 
 export function createEslintConfig() {
@@ -100,9 +91,10 @@ export function createEslintConfig() {
         ],
       },
     },
-    // Boundary 1: apps/web imports only @app/contracts among workspace packages and never Node-only server config.
+    // Boundary 1: apps/web/src imports only @app/contracts among workspace packages and never Node-only modules.
+    // Root Vite/Vitest config files (apps/web/*.config.ts) run in Node and are intentionally outside this glob.
     {
-      files: ['apps/web/**/*.{ts,tsx,js,jsx,mjs}'],
+      files: ['apps/web/src/**/*.{ts,tsx,js,jsx,mjs}'],
       rules: {
         'no-restricted-imports': [
           'error',
@@ -111,7 +103,7 @@ export function createEslintConfig() {
               {
                 group: WEB_FORBIDDEN_PACKAGES,
                 message:
-                  'apps/web may only import @app/contracts from workspace packages and cannot import Node-only modules (spec §10.1).',
+                  'apps/web/src may only import @app/contracts from workspace packages and cannot import Node-only modules (spec §10.1).',
               },
             ],
           },
@@ -145,7 +137,7 @@ export function createEslintConfig() {
           {
             patterns: [
               {
-                group: ['@app/*', '@nestjs/*', 'node:*'],
+                group: CONTRACTS_FORBIDDEN_PACKAGES,
                 message:
                   'packages/contracts is browser-safe and cannot import other workspace packages, Nest, or Node built-ins (spec §10.1).',
               },
@@ -181,12 +173,24 @@ export function createEslintConfig() {
           {
             patterns: [
               {
-                group: ['@app/db/testing', '@app/db/testing/*', '@app/testkit', '@app/testkit/*'],
+                group: [
+                  '@app/db/testing',
+                  '@app/db/testing/*',
+                  '@app/testkit',
+                  '@app/testkit/*',
+                  '**/packages/testkit/**',
+                  '**/packages/db/src/testing/**',
+                ],
                 message:
                   'Production app code must never import test helpers (@app/db/testing or @app/testkit) (spec §10.1).',
               },
               {
-                group: ['@app/db/schema', '@app/db/schema/*', '*/packages/db/src/schema*'],
+                group: [
+                  '@app/db/schema',
+                  '@app/db/schema/*',
+                  '**/packages/db/src/schema*',
+                  '**/packages/db/src/schema/**',
+                ],
                 message:
                   'Raw schema/documents queries are allowed only inside packages/db (spec §10.1).',
               },

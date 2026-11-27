@@ -16,13 +16,28 @@ async function lintSnippet(code: string, relFilePath: string) {
 }
 
 describe('ESLint import boundaries (spec §10.1)', () => {
-  it('blocks apps/web from importing @app/config/server-config and node built-ins', async () => {
+  it('blocks apps/web/src from importing @app/config/server-config, bare or prefixed Node built-ins, and relative escapes', async () => {
     const messages = await lintSnippet(
-      `import { defineServerConfig } from '@app/config/server-config';\nimport fs from 'node:fs';\nexport const x = [defineServerConfig, fs];\n`,
+      [
+        `import { defineServerConfig } from '@app/config/server-config';`,
+        `import fs from 'node:fs';`,
+        `import path from 'path';`,
+        `import { x } from '../../../packages/config/src/server-config.js';`,
+        `export const bad = [defineServerConfig, fs, path, x];`,
+      ].join('\n'),
       'apps/web/src/bad.ts',
     );
     const restricted = messages.filter((m) => m.ruleId === 'no-restricted-imports');
-    expect(restricted).toHaveLength(2);
+    expect(restricted).toHaveLength(4);
+  });
+
+  it('allows apps/web config files (e.g. vite.config.ts) to import Node built-ins', async () => {
+    const messages = await lintSnippet(
+      `import path from 'node:path';\nexport default { root: path.resolve('.') };\n`,
+      'apps/web/vite.config.ts',
+    );
+    const restricted = messages.filter((m) => m.ruleId === 'no-restricted-imports');
+    expect(restricted).toHaveLength(0);
   });
 
   it('allows apps/web to import @app/contracts', async () => {
@@ -34,19 +49,36 @@ describe('ESLint import boundaries (spec §10.1)', () => {
     expect(restricted).toHaveLength(0);
   });
 
-  it('blocks packages/core from importing Node IO, Drizzle, Nest, or non-contracts packages', async () => {
+  it('blocks packages/core from importing Node IO (bare or prefixed), Drizzle, Nest, non-contracts packages, or relative escapes', async () => {
     const messages = await lintSnippet(
       [
         `import fs from 'node:fs';`,
+        `import { EventEmitter } from 'events';`,
         `import { sql } from 'drizzle-orm';`,
         `import { Injectable } from '@nestjs/common';`,
         `import { x } from '@app/db';`,
-        `export const bad = [fs, sql, Injectable, x];`,
+        `import { y } from '@app/api';`,
+        `import { z } from '../../db/src/index.js';`,
+        `export const bad = [fs, EventEmitter, sql, Injectable, x, y, z];`,
       ].join('\n'),
       'packages/core/src/bad.ts',
     );
     const restricted = messages.filter((m) => m.ruleId === 'no-restricted-imports');
-    expect(restricted).toHaveLength(4);
+    expect(restricted).toHaveLength(7);
+  });
+
+  it('blocks packages/contracts from importing bare Node built-ins, workspace packages, or relative escapes', async () => {
+    const messages = await lintSnippet(
+      [
+        `import crypto from 'crypto';`,
+        `import { a } from '@app/core';`,
+        `import { b } from '../../core/src/index.js';`,
+        `export const bad = [crypto, a, b];`,
+      ].join('\n'),
+      'packages/contracts/src/bad.ts',
+    );
+    const restricted = messages.filter((m) => m.ruleId === 'no-restricted-imports');
+    expect(restricted).toHaveLength(3);
   });
 
   it('blocks db, storage, pdf, and llm from importing @nestjs/*', async () => {
@@ -60,19 +92,20 @@ describe('ESLint import boundaries (spec §10.1)', () => {
     }
   });
 
-  it('blocks apps/api/src and apps/worker/src from importing test helpers or raw db schema', async () => {
+  it('blocks apps/api/src and apps/worker/src from importing test helpers or raw db schema (package or relative)', async () => {
     for (const app of ['api', 'worker']) {
       const messages = await lintSnippet(
         [
           `import { a } from '@app/testkit';`,
           `import { b } from '@app/db/testing';`,
           `import { c } from '@app/db/schema/documents';`,
-          `export const bad = [a, b, c];`,
+          `import { d } from '../../../packages/db/src/schema/documents.js';`,
+          `export const bad = [a, b, c, d];`,
         ].join('\n'),
         `apps/${app}/src/bad.ts`,
       );
       const restricted = messages.filter((m) => m.ruleId === 'no-restricted-imports');
-      expect(restricted, `expected test/schema ban in apps/${app}/src`).toHaveLength(3);
+      expect(restricted, `expected test/schema ban in apps/${app}/src`).toHaveLength(4);
     }
   });
 });

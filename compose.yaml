@@ -38,7 +38,11 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-lomi}"']
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-lomi}"',
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -63,7 +67,7 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', 'redis-cli ping | grep -qx PONG']
       interval: 5s
       timeout: 5s
       retries: 10

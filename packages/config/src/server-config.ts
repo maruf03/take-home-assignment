@@ -36,6 +36,46 @@ export function resetDevDefaultWarningForTests(): void {
   hasWarnedDefaultLogger = false;
 }
 
+function safeDecodeURIComponent(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function extractUrlCredentials(value: string): string[] {
+  const candidates: string[] = [];
+  try {
+    const parsedUrl = new URL(value);
+    if (parsedUrl.username) {
+      candidates.push(safeDecodeURIComponent(parsedUrl.username));
+    }
+    if (parsedUrl.password) {
+      candidates.push(safeDecodeURIComponent(parsedUrl.password));
+    }
+    return candidates;
+  } catch {
+    // Fallback for multi-host or Unix-socket URIs (e.g. postgresql://user:pass@h1:5432,h2:5432/db
+    // or postgresql://user:pass@/db?host=/var/run/postgresql) which Node's WHATWG URL rejects.
+    const match = /^[a-z][a-z0-9+.-]*:\/\/([^/?#@]*)@/i.exec(value);
+    if (!match?.[1]) {
+      return candidates;
+    }
+    const userinfo = match[1];
+    const colonIdx = userinfo.indexOf(':');
+    if (colonIdx === -1) {
+      candidates.push(safeDecodeURIComponent(userinfo));
+    } else {
+      const user = userinfo.slice(0, colonIdx);
+      const pass = userinfo.slice(colonIdx + 1);
+      if (user) candidates.push(safeDecodeURIComponent(user));
+      if (pass) candidates.push(safeDecodeURIComponent(pass));
+    }
+    return candidates;
+  }
+}
+
 function matchesDenylist(value: string, denylistLower: ReadonlySet<string>): boolean {
   const trimmed = value.trim().toLowerCase();
   if (trimmed.length === 0) {
@@ -45,18 +85,11 @@ function matchesDenylist(value: string, denylistLower: ReadonlySet<string>): boo
     return true;
   }
   if (trimmed.includes('://')) {
-    try {
-      const parsedUrl = new URL(value);
-      const password = decodeURIComponent(parsedUrl.password).trim().toLowerCase();
-      const username = decodeURIComponent(parsedUrl.username).trim().toLowerCase();
-      if (password.length > 0 && denylistLower.has(password)) {
+    for (const credential of extractUrlCredentials(value.trim())) {
+      const normalized = credential.trim().toLowerCase();
+      if (normalized.length > 0 && denylistLower.has(normalized)) {
         return true;
       }
-      if (username.length > 0 && denylistLower.has(username)) {
-        return true;
-      }
-    } catch {
-      // Not a valid URL; exact match check above already ran.
     }
   }
   return false;
@@ -118,20 +151,24 @@ export function defineServerConfig<TSchema extends z.ZodType>(
   const parsedRecord =
     parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
 
-  const appEnvRaw =
-    typeof parsedRecord?.['APP_ENV'] === 'string'
-      ? parsedRecord['APP_ENV']
-      : (rawEnv['APP_ENV'] ?? 'development');
+  const parsedAppEnv =
+    typeof parsedRecord?.['APP_ENV'] === 'string' && parsedRecord['APP_ENV'].trim().length > 0
+      ? parsedRecord['APP_ENV'].trim()
+      : undefined;
+  const envAppEnv =
+    typeof rawEnv['APP_ENV'] === 'string' && rawEnv['APP_ENV'].trim().length > 0
+      ? rawEnv['APP_ENV'].trim()
+      : undefined;
+  const appEnvRaw = parsedAppEnv ?? envAppEnv ?? 'development';
 
   const llmProvider = parsedRecord?.['LLM_PROVIDER'];
-  if (
-    typeof llmProvider === 'string' &&
-    TEST_ONLY_LLM_PROVIDERS.has(llmProvider) &&
-    appEnvRaw !== 'test'
-  ) {
-    throw new ConfigError(
-      `LLM_PROVIDER="${llmProvider}" is only permitted when APP_ENV=test (current APP_ENV="${appEnvRaw}")`,
-    );
+  if (typeof llmProvider === 'string') {
+    const normalizedProvider = llmProvider.trim().toLowerCase();
+    if (TEST_ONLY_LLM_PROVIDERS.has(normalizedProvider) && appEnvRaw !== 'test') {
+      throw new ConfigError(
+        `LLM_PROVIDER="${llmProvider}" is only permitted when APP_ENV=test (current APP_ENV="${appEnvRaw}")`,
+      );
+    }
   }
 
   const denylist = options.denylist ?? DEV_DEFAULT_SECRETS;
