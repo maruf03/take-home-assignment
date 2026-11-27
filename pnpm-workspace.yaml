@@ -3,8 +3,10 @@ packages:
   - 'packages/*'
 
 allowBuilds:
+  '@swc/core': true
   esbuild: true
   lefthook: true
+  msgpackr-extract: false
   protobufjs: false
 
 minimumReleaseAgeExclude:
