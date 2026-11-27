@@ -1,0 +1,90 @@
+{
+  "invoice": {
+    "displayName": "Invoice",
+    "instructions": "Extract billing header metadata and the final total payable from the invoice. Distinguish the supplier/vendor issuing the invoice from the billed recipient, and distinguish the final total amount due from subtotals, taxes, discounts, or individual line items.",
+    "defaultCurrency": "USD",
+    "dateOrder": "MDY",
+    "fields": {
+      "invoice_number": {
+        "label": "Invoice number",
+        "description": "Unique invoice identifier printed on the invoice (not purchase order number, account number, or reference code)."
+      },
+      "issue_date": {
+        "label": "Issue date",
+        "description": "Date the invoice was issued (not the payment due date or service period dates)."
+      },
+      "due_date": {
+        "label": "Due date",
+        "description": "Payment due date for the invoice (not the issue date)."
+      },
+      "vendor_name": {
+        "label": "Vendor name",
+        "description": "Legal or business name of the supplier issuing the invoice (not the customer / Bill To recipient)."
+      },
+      "total_amount": {
+        "label": "Total amount",
+        "description": "Final grand total / amount due on the invoice including tax and adjustments (not subtotal, tax line, or individual line-item totals)."
+      }
+    }
+  },
+  "lease": {
+    "displayName": "Lease",
+    "instructions": "Extract key residential or commercial lease terms. Distinguish the tenant/lessee from the landlord/lessor, and distinguish recurring monthly base rent from security deposit, late fees, or aggregate annual figures.",
+    "defaultCurrency": "USD",
+    "dateOrder": "MDY",
+    "fields": {
+      "tenant_name": {
+        "label": "Tenant name",
+        "description": "Name of the tenant / lessee renting the premises (not the landlord, property manager, or guarantor)."
+      },
+      "monthly_rent": {
+        "label": "Monthly rent",
+        "description": "Recurring base monthly rent amount (not the security deposit, annual total, or late fee)."
+      },
+      "security_deposit": {
+        "label": "Security deposit",
+        "description": "Refundable security deposit required under the lease (not monthly rent or pet/application fees)."
+      },
+      "lease_start": {
+        "label": "Lease start",
+        "description": "Commencement / start date of the lease term (not the execution/signature date or lease end date)."
+      },
+      "term_months": {
+        "label": "Term (months)",
+        "description": "Total duration of the lease term expressed in months (numeric count only)."
+      }
+    }
+  },
+  "market_report": {
+    "displayName": "Market report",
+    "instructions": "Extract headline rental-market metrics for the primary reporting period and geography. Distinguish current-period headline figures from prior-year comparisons, submarket benchmarks, or other unit types (studio/2BR).",
+    "defaultCurrency": "USD",
+    "dateOrder": "MDY",
+    "fields": {
+      "report_quarter": {
+        "label": "Report quarter",
+        "description": "Reporting quarter and year covered by the report (e.g., Q3 2025)."
+      },
+      "market_area": {
+        "label": "Market area",
+        "description": "Primary geographic market or metro area covered by the report."
+      },
+      "vacancy_rate": {
+        "label": "Vacancy rate",
+        "description": "Current headline vacancy rate percentage for the market area (not occupancy rate or prior-year rate)."
+      },
+      "average_rent_1br": {
+        "label": "Average 1BR rent",
+        "description": "Average monthly rent specifically for one-bedroom (1BR) units (not studio, 2BR, or overall blended average)."
+      },
+      "year_over_year_rent_growth": {
+        "label": "YoY rent growth",
+        "description": "Year-over-year (YoY) percentage change in rents (not quarter-over-quarter change or vacancy change)."
+      },
+      "median_household_income": {
+        "label": "Median household income",
+        "description": "Median annual household income reported for the market area."
+      }
+    }
+  }
+}
