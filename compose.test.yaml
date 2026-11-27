@@ -1,0 +1,30 @@
+# Test overlay: adds an isolated `redis-chaos` instance on 127.0.0.1:6380
+# exclusively for serial chaos/FLUSHALL tests (spec §10.5 & §11.3) so 6379 is never flushed.
+
+services:
+  redis-chaos:
+    image: redis:8@sha256:56a1737794e36c3ebe8a4544a8ab421af3ab1a6488fb2238aec228c404933fed
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - ''
+      - --appendonly
+      - 'no'
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_PASSWORD:-dev-redis}
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-dev-redis}
+    ports:
+      - '127.0.0.1:6380:6379'
+    networks:
+      - backend
+      - edge
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli ping | grep -qx PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s

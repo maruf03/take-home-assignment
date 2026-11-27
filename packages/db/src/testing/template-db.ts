@@ -120,7 +120,7 @@ export async function withTemplateDb(
   });
   const appPool = new Pool({
     connectionString: buildDbUrl(baseAppUrl, databaseName),
-    max: 5,
+    max: 12,
   });
 
   const migratorDb = drizzle(migratorPool, { schema });
