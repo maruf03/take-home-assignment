@@ -4,9 +4,18 @@ import { BullModule } from '@nestjs/bullmq';
 import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { LlmCircuitBreaker } from './circuit-breaker.js';
-import { buildWorkerLlmProviderResolver, loadWorkerConfig, type WorkerConfig } from './config.js';
+import {
+  buildWorkerLlmProviderResolver,
+  loadWorkerConfig,
+  resolveWorkerLimiter,
+  type WorkerConfig,
+} from './config.js';
 import { ExtractionPipeline } from './extraction-pipeline.js';
-import { EXTRACTION_QUEUE, ExtractionProcessor } from './extraction.processor.js';
+import {
+  EXTRACTION_QUEUE,
+  extractionBackoffStrategy,
+  ExtractionProcessor,
+} from './extraction.processor.js';
 import { ParsePoolService } from './parse-pool.provider.js';
 
 export const WORKER_CONFIG = Symbol('WORKER_CONFIG');
@@ -14,33 +23,19 @@ export const WORKER_DB = Symbol('WORKER_DB');
 export const WORKER_REDIS = Symbol('WORKER_REDIS');
 export const WORKER_BLOB_STORE = Symbol('WORKER_BLOB_STORE');
 
+const BULLMQ_WORKER_METADATA = 'bullmq:worker_metadata';
+
 interface WorkerDbHandle {
   readonly db: AppDatabase;
   close(): Promise<void>;
 }
 
+/**
+ * Shared infrastructure module parsed once and imported by both `BullModule.forRootAsync`
+ * and `WorkerModule`, ensuring single config load and guaranteed Redis/DB/S3 cleanup even
+ * if startup aborts before `BullExplorer` initializes the BullMQ worker.
+ */
 @Module({
-  imports: [
-    BullModule.forRootAsync({
-      useFactory: () => {
-        const config = loadWorkerConfig();
-        // Spec §10.2: Worker ioredis uses maxRetriesPerRequest: null and passes the ioredis instance to BullModule.
-        const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
-        return {
-          connection,
-          defaultJobOptions: {
-            attempts: 5,
-            backoff: { type: 'exponential', delay: 5_000 },
-            removeOnComplete: 100,
-            removeOnFail: 500,
-          },
-        };
-      },
-    }),
-    BullModule.registerQueue({
-      name: EXTRACTION_QUEUE,
-    }),
-  ],
   providers: [
     {
       provide: WORKER_CONFIG,
@@ -59,6 +54,13 @@ interface WorkerDbHandle {
       },
     },
     {
+      provide: WORKER_REDIS,
+      inject: [WORKER_CONFIG],
+      // Spec §10.2: Worker ioredis uses maxRetriesPerRequest: null and passes the instance to BullModule.
+      useFactory: (config: WorkerConfig): Redis =>
+        new Redis(config.REDIS_URL, { maxRetriesPerRequest: null }),
+    },
+    {
       provide: WORKER_BLOB_STORE,
       inject: [WORKER_CONFIG],
       useFactory: (config: WorkerConfig): BlobStore =>
@@ -66,11 +68,64 @@ interface WorkerDbHandle {
           endpoint: config.S3_ENDPOINT,
           region: config.S3_REGION,
           bucket: config.S3_BUCKET,
-          accessKeyId: config.S3_ACCESS_KEY_ID,
-          secretAccessKey: config.S3_SECRET_ACCESS_KEY,
+          accessKeyId: config.S3_ACCESS_KEY,
+          secretAccessKey: config.S3_SECRET_KEY,
           forcePathStyle: true,
         }),
     },
+  ],
+  exports: [WORKER_CONFIG, WORKER_DB, WORKER_REDIS, WORKER_BLOB_STORE],
+})
+class WorkerInfraModule implements OnApplicationShutdown {
+  constructor(
+    @Inject(WORKER_DB) private readonly dbHandle: WorkerDbHandle,
+    @Inject(WORKER_REDIS) private readonly redis: Redis,
+    @Inject(WORKER_BLOB_STORE) private readonly blobStore: BlobStore,
+  ) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    this.blobStore.close?.();
+    await this.dbHandle.close();
+    this.redis.disconnect();
+  }
+}
+
+@Module({
+  imports: [
+    WorkerInfraModule,
+    BullModule.forRootAsync({
+      imports: [WorkerInfraModule],
+      inject: [WORKER_CONFIG, WORKER_REDIS],
+      useFactory: (config: WorkerConfig, connection: Redis) => {
+        // Apply runtime WorkerConfig (concurrency, integer limiter, custom backoff strategy)
+        // during provider instantiation, strictly before BullExplorer creates the BullMQ Worker.
+        Reflect.defineMetadata(
+          BULLMQ_WORKER_METADATA,
+          {
+            concurrency: config.WORKER_CONCURRENCY,
+            limiter: resolveWorkerLimiter(config),
+            settings: {
+              backoffStrategy: extractionBackoffStrategy,
+            },
+          },
+          ExtractionProcessor,
+        );
+        return {
+          connection,
+          defaultJobOptions: {
+            attempts: 5,
+            backoff: { type: 'custom' },
+            removeOnComplete: 100,
+            removeOnFail: 500,
+          },
+        };
+      },
+    }),
+    BullModule.registerQueue({
+      name: EXTRACTION_QUEUE,
+    }),
+  ],
+  providers: [
     ParsePoolService,
     {
       provide: LlmCircuitBreaker,
@@ -103,20 +158,4 @@ interface WorkerDbHandle {
   ],
   exports: [ExtractionPipeline, ExtractionProcessor, ParsePoolService],
 })
-export class WorkerModule implements OnApplicationShutdown {
-  constructor(
-    @Inject(WORKER_DB) private readonly dbHandle: WorkerDbHandle,
-    @Inject(WORKER_BLOB_STORE) private readonly blobStore: BlobStore,
-    @Inject(ExtractionProcessor) private readonly processor: ExtractionProcessor,
-  ) {}
-
-  async onApplicationShutdown(): Promise<void> {
-    this.blobStore.close?.();
-    await this.dbHandle.close();
-    const workerConn = (this.processor as unknown as { worker?: { opts?: { connection?: Redis } } })
-      .worker?.opts?.connection;
-    if (workerConn && typeof workerConn.disconnect === 'function') {
-      workerConn.disconnect();
-    }
-  }
-}
+export class WorkerModule {}

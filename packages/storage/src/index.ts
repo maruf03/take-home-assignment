@@ -42,8 +42,8 @@ export interface S3BlobStoreConfig {
   readonly endpoint?: string;
   readonly region: string;
   readonly bucket: string;
-  readonly accessKeyId: string;
-  readonly secretAccessKey: string;
+  readonly accessKeyId?: string;
+  readonly secretAccessKey?: string;
   readonly forcePathStyle?: boolean;
 }
 
@@ -88,16 +88,22 @@ export class S3BlobStore implements BlobStore {
 
   constructor(config: S3BlobStoreConfig) {
     this.bucket = config.bucket;
+    const hasExplicitCreds =
+      Boolean(config.accessKeyId?.trim()) && Boolean(config.secretAccessKey?.trim());
     this.client = new S3Client({
       ...(config.endpoint ? { endpoint: config.endpoint } : {}),
       region: config.region,
       forcePathStyle: config.forcePathStyle ?? true,
       requestChecksumCalculation: 'WHEN_REQUIRED',
       responseChecksumValidation: 'WHEN_REQUIRED',
-      credentials: {
-        accessKeyId: config.accessKeyId,
-        secretAccessKey: config.secretAccessKey,
-      },
+      ...(hasExplicitCreds
+        ? {
+            credentials: {
+              accessKeyId: config.accessKeyId!,
+              secretAccessKey: config.secretAccessKey!,
+            },
+          }
+        : {}),
     });
   }
 

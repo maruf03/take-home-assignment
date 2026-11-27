@@ -12,42 +12,105 @@ import { z } from 'zod';
 
 const llmProviderSchema = z.enum(['gemini', 'anthropic', 'fake', 'fake-ipc', 'cassette']);
 
-export const workerConfigSchema = z.object({
-  APP_ENV: appEnvSchema,
-  DATABASE_URL: z.string().min(1),
-  REDIS_URL: z.string().min(1),
-  S3_ENDPOINT: z.string().optional(),
-  S3_REGION: z.string().default('us-east-1'),
-  S3_BUCKET: z.string().default('documents'),
-  S3_ACCESS_KEY_ID: z.string().min(1),
-  S3_SECRET_ACCESS_KEY: z.string().min(1),
-  LLM_PROVIDER: llmProviderSchema.default('gemini'),
-  LLM_MODEL: z.string().min(1).default('gemini-3.5-flash'),
-  GEMINI_API_KEY: z.string().default(''),
-  GEMINI_BASE_URL: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().default(''),
-  ANTHROPIC_BASE_URL: z.string().optional(),
-  LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
-  LLM_LIMIT_MAX: z.coerce.number().optional(),
-  LLM_LIMIT_DURATION_MS: z.coerce.number().optional(),
-  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(2),
-  WORKER_ID: z
-    .string()
-    .min(1)
-    .default(() => `${os.hostname()}-${process.pid}`),
-  LEASE_SECONDS: z.coerce.number().int().min(5).max(300).default(30),
-  HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(500).max(60_000).default(10_000),
-  CHUNK_CHAR_LIMIT: z.coerce.number().int().min(1000).default(400_000),
-  CASSETTES_DIR: z.string().optional(),
-  FAKE_IPC_ENDPOINT: z.string().optional(),
-});
+const DEV_DATABASE_URL = 'postgresql://app:dev-app@127.0.0.1:5432/lomi';
+const DEV_REDIS_URL = 'redis://:dev-redis@127.0.0.1:6379';
+const DEV_S3_ENDPOINT = 'http://127.0.0.1:8333';
+const DEV_S3_ACCESS_KEY = 'dev-s3-key';
+const DEV_S3_SECRET_KEY = 'dev-s3-secret';
+
+const optionalNonEmptyString = z.preprocess(
+  (v) =>
+    typeof v === 'string' && v.trim() === '' ? undefined : typeof v === 'string' ? v.trim() : v,
+  z.string().min(1).optional(),
+);
+
+const optionalPositiveInt = z.preprocess(
+  (v) =>
+    v === undefined || v === null || (typeof v === 'string' && v.trim() === '') ? undefined : v,
+  z.coerce.number().int().positive().optional(),
+);
+
+export const workerConfigSchema = z
+  .object({
+    APP_ENV: appEnvSchema,
+    DATABASE_URL: z.string().trim().min(1),
+    REDIS_URL: z.string().trim().min(1),
+    S3_ENDPOINT: optionalNonEmptyString,
+    S3_REGION: z.string().trim().min(1).default('us-east-1'),
+    S3_BUCKET: z.string().trim().min(1).default('documents'),
+    S3_ACCESS_KEY: optionalNonEmptyString,
+    S3_SECRET_KEY: optionalNonEmptyString,
+    LLM_PROVIDER: llmProviderSchema.default('gemini'),
+    LLM_MODEL: z.string().trim().min(1).default('gemini-3.5-flash'),
+    GEMINI_API_KEY: z.string().default(''),
+    GEMINI_BASE_URL: optionalNonEmptyString,
+    ANTHROPIC_API_KEY: z.string().default(''),
+    ANTHROPIC_BASE_URL: optionalNonEmptyString,
+    LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+    LLM_LIMIT_MAX: optionalPositiveInt,
+    LLM_LIMIT_DURATION_MS: optionalPositiveInt,
+    WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(2),
+    WORKER_ID: z
+      .string()
+      .trim()
+      .min(1)
+      .default(() => `${os.hostname()}-${process.pid}`),
+    LEASE_SECONDS: z.coerce.number().int().min(1).max(300).default(30),
+    HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(10_000),
+    CHUNK_CHAR_LIMIT: z.coerce.number().int().min(1000).default(400_000),
+    CASSETTES_DIR: optionalNonEmptyString,
+    FAKE_IPC_ENDPOINT: optionalNonEmptyString,
+  })
+  .superRefine((cfg, ctx) => {
+    if (cfg.HEARTBEAT_INTERVAL_MS >= cfg.LEASE_SECONDS * 1000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['HEARTBEAT_INTERVAL_MS'],
+        message: 'HEARTBEAT_INTERVAL_MS must be strictly less than LEASE_SECONDS * 1000',
+      });
+    }
+  });
 
 export type WorkerConfig = Readonly<z.output<typeof workerConfigSchema>>;
 
 export function loadWorkerConfig(
   env: Record<string, string | undefined> = process.env,
 ): WorkerConfig {
-  return defineServerConfig(workerConfigSchema, { env });
+  const preEnv = appEnvSchema.safeParse(env['APP_ENV']);
+  const isProd = preEnv.success && preEnv.data === 'production';
+
+  const effectiveEnv: Record<string, string | undefined> = { ...env };
+  // Support canonical S3_ACCESS_KEY / S3_SECRET_KEY (.env.example, @app/db) as well as AWS-style fallback
+  if (!effectiveEnv['S3_ACCESS_KEY'] && effectiveEnv['S3_ACCESS_KEY_ID']) {
+    effectiveEnv['S3_ACCESS_KEY'] = effectiveEnv['S3_ACCESS_KEY_ID'];
+  }
+  if (!effectiveEnv['S3_SECRET_KEY'] && effectiveEnv['S3_SECRET_ACCESS_KEY']) {
+    effectiveEnv['S3_SECRET_KEY'] = effectiveEnv['S3_SECRET_ACCESS_KEY'];
+  }
+
+  // Apply non-production dev defaults only when not using AWS_SHARED_CREDENTIALS_FILE / explicit values.
+  if (!isProd) {
+    if (effectiveEnv['DATABASE_URL'] === undefined) {
+      effectiveEnv['DATABASE_URL'] = DEV_DATABASE_URL;
+    }
+    if (effectiveEnv['REDIS_URL'] === undefined) {
+      effectiveEnv['REDIS_URL'] = DEV_REDIS_URL;
+    }
+    if (effectiveEnv['S3_ENDPOINT'] === undefined) {
+      effectiveEnv['S3_ENDPOINT'] = DEV_S3_ENDPOINT;
+    }
+    const usesSharedCreds = Boolean(effectiveEnv['AWS_SHARED_CREDENTIALS_FILE']?.trim());
+    if (!usesSharedCreds) {
+      if (effectiveEnv['S3_ACCESS_KEY'] === undefined) {
+        effectiveEnv['S3_ACCESS_KEY'] = DEV_S3_ACCESS_KEY;
+      }
+      if (effectiveEnv['S3_SECRET_KEY'] === undefined) {
+        effectiveEnv['S3_SECRET_KEY'] = DEV_S3_SECRET_KEY;
+      }
+    }
+  }
+
+  return defineServerConfig(workerConfigSchema, { env: effectiveEnv });
 }
 
 export function resolveWorkerLimiter(config: WorkerConfig): LimiterConfig {
@@ -55,37 +118,6 @@ export function resolveWorkerLimiter(config: WorkerConfig): LimiterConfig {
     max: config.LLM_LIMIT_MAX,
     duration: config.LLM_LIMIT_DURATION_MS,
   });
-}
-
-/**
- * Resolves BullMQ WorkerOptions (`concurrency` and integer `limiter`) at module decoration time
- * so `@Processor(EXTRACTION_QUEUE, ...)` wires real BullMQ rate limiting and concurrency.
- */
-export function resolveProcessorWorkerOptions(
-  env: Record<string, string | undefined> = process.env,
-): { concurrency: number; limiter: LimiterConfig } {
-  const rawProvider = env['LLM_PROVIDER']?.trim().toLowerCase() ?? 'gemini';
-  const provider: LlmProviderName = llmProviderSchema.safeParse(rawProvider).success
-    ? (rawProvider as LlmProviderName)
-    : 'gemini';
-
-  const parsedMax = env['LLM_LIMIT_MAX'] ? Number(env['LLM_LIMIT_MAX']) : undefined;
-  const parsedDuration = env['LLM_LIMIT_DURATION_MS']
-    ? Number(env['LLM_LIMIT_DURATION_MS'])
-    : undefined;
-  const limiter = resolveLimiterConfig(provider, {
-    max: parsedMax !== undefined && Number.isFinite(parsedMax) ? parsedMax : undefined,
-    duration:
-      parsedDuration !== undefined && Number.isFinite(parsedDuration) ? parsedDuration : undefined,
-  });
-
-  const parsedConcurrency = env['WORKER_CONCURRENCY'] ? Number(env['WORKER_CONCURRENCY']) : 2;
-  const concurrency =
-    Number.isFinite(parsedConcurrency) && parsedConcurrency >= 1
-      ? Math.min(32, Math.trunc(parsedConcurrency))
-      : 2;
-
-  return { concurrency, limiter };
 }
 
 /**

@@ -7,8 +7,9 @@ describe('S3BlobStore (live SeaweedFS integration)', () => {
       endpoint: process.env['S3_ENDPOINT'] ?? 'http://127.0.0.1:8333',
       region: process.env['S3_REGION'] ?? 'us-east-1',
       bucket: process.env['S3_BUCKET'] ?? 'documents',
-      accessKeyId: process.env['S3_ACCESS_KEY_ID'] ?? 'dev-s3-key',
-      secretAccessKey: process.env['S3_SECRET_ACCESS_KEY'] ?? 'dev-s3-secret',
+      accessKeyId: process.env['S3_ACCESS_KEY'] ?? process.env['S3_ACCESS_KEY_ID'] ?? 'dev-s3-key',
+      secretAccessKey:
+        process.env['S3_SECRET_KEY'] ?? process.env['S3_SECRET_ACCESS_KEY'] ?? 'dev-s3-secret',
       forcePathStyle: true,
     });
 
@@ -26,6 +27,15 @@ describe('S3BlobStore (live SeaweedFS integration)', () => {
 
       const roundTrip = await store.getObject(key);
       expect(roundTrip.equals(payload)).toBe(true);
+
+      // Aborted signal fails cleanly with StorageError
+      const ac = new AbortController();
+      ac.abort();
+      await expect(store.getObject(key, ac.signal)).rejects.toMatchObject({
+        name: 'StorageError',
+        code: 'STORAGE_UNAVAILABLE',
+        transient: true,
+      });
 
       expect(await store.headObject(`${key}.missing`)).toBeNull();
       await expect(store.getObject(`${key}.missing`)).rejects.toMatchObject({

@@ -261,7 +261,7 @@ function extractOutputFromStoredCall(reusable: LlmCallRow, requestedModel: strin
           );
           return a.kind === 'ok' ? a.output : null;
         }
-        return parsed;
+        return 'fields' in parsed ? parsed : null;
       }
     } catch {
       return null;
@@ -334,7 +334,7 @@ export class ExtractionPipeline {
         : () => llmProviderOrFactory;
     this.workerId = options.workerId;
     this.model = options.model;
-    this.leaseSeconds = Math.max(5, Math.trunc(options.leaseSeconds ?? DEFAULT_LEASE_SECONDS));
+    this.leaseSeconds = Math.max(1, Math.trunc(options.leaseSeconds ?? DEFAULT_LEASE_SECONDS));
     this.heartbeatIntervalMs = Math.max(
       100,
       Math.trunc(options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS),
@@ -567,12 +567,17 @@ export class ExtractionPipeline {
         }
 
         const seq = nextSeq();
+        // Spec §4.7: llm_calls.request stores system + user + tool schema (never headers or keys).
         const requestMeta = {
           kind: params.kind,
           chunkIndex: params.chunkIndex,
-          maxOutputTokens: params.maxOutputTokens,
           promptVersion: params.promptVersion,
-          repairErrors: params.repair?.errors ?? null,
+          toolName: 'record_extraction',
+          system: params.system,
+          user: params.user,
+          schema,
+          maxOutputTokens: params.maxOutputTokens,
+          repair: params.repair ?? null,
         };
 
         const insertedCall = await withTx(this.db, (tx) =>
@@ -582,7 +587,8 @@ export class ExtractionPipeline {
               versionId,
               seq,
               kind: params.kind,
-              chunkIndex: params.chunkIndex,
+              // Spec §4.7 CHECK: (kind = 'chunk') = (chunk_index IS NOT NULL).
+              chunkIndex: params.kind === 'chunk' ? params.chunkIndex : null,
               requestSha256: params.requestSha256,
               provider: provider.name,
               model: this.model,
@@ -627,7 +633,7 @@ export class ExtractionPipeline {
           const errCode = err instanceof LlmError ? err.code : 'NETWORK';
           const errMsg = err instanceof Error ? err.message : String(err);
           const errRaw = err instanceof LlmError ? err.raw : undefined;
-          await withTx(this.db, (tx) =>
+          const completedErr = await withTx(this.db, (tx) =>
             completeLlmCall(tx, insertedCall.id, versionId, runId, {
               rawResponse: errRaw ?? null,
               schemaValid: false,
@@ -635,6 +641,9 @@ export class ExtractionPipeline {
               errorMessage: errMsg,
             }),
           );
+          if (!completedErr) {
+            throw new FenceLostError('Lost fence completing failed C2 llm_calls row');
+          }
           throw err;
         }
 
@@ -657,7 +666,7 @@ export class ExtractionPipeline {
             usage: result.usage,
             costUsd: costUsd.toFixed(6),
             latencyMs: result.latencyMs,
-            errorCode: schemaValid ? null : result.kind,
+            errorCode: schemaValid ? null : result.kind === 'ok' ? 'schema_invalid' : result.kind,
             errorMessage: schemaValid
               ? null
               : result.kind === 'schema_invalid'
@@ -713,17 +722,14 @@ export class ExtractionPipeline {
               if (!err.transient) {
                 throw new PermanentFailureError(mapLlmErrorToPermanentCode(err), err.message, err);
               }
-              // Spec §5.3 & §6: retry in-run when retry-after <= 20s (full jitter), otherwise release to BullMQ.
+              // Spec §5.3 & §6: retry in-run when retry-after <= 20s (full jitter 0..retryAfterMs), otherwise release to BullMQ.
               if (
                 err.retryAfterMs !== undefined &&
                 err.retryAfterMs <= this.inRunRetryMaxMs &&
                 inRunAttempts < this.maxInRunRetries
               ) {
                 inRunAttempts += 1;
-                const jitteredMs = Math.max(
-                  0,
-                  Math.ceil(err.retryAfterMs * (0.5 + 0.5 * this.random())),
-                );
+                const jitteredMs = Math.max(0, Math.ceil(err.retryAfterMs * this.random()));
                 await this.sleep(jitteredMs, runSignal);
                 continue;
               }
@@ -931,108 +937,110 @@ export class ExtractionPipeline {
       assertNotAborted();
 
       // Step 6: C3 — Carry-over A′ & Fenced Finalize (§3, §5.6)
+      // Baseline version & review reads run inside `buildValues` strictly AFTER `finalizeRun`
+      // acquires `documents FOR UPDATE` and fenced `document_versions FOR UPDATE`.
       const finalParsedText = parsedText;
       const finalParserName = parserName;
       const finalTextRanges = textRanges;
       const finalWarnings = warnings;
 
-      const finalized = await withTx(this.db, async (tx) => {
-        const baselineVersion = await getBaselineExtractedVersion(
-          tx,
-          version.documentId,
-          version.versionNumber,
-        );
-
-        const baselineRows = baselineVersion
-          ? await listValuesForVersion(tx, baselineVersion.id)
-          : [];
-        const baselineByKey = new Map(baselineRows.map((row) => [row.value.fieldKey, row]));
-
-        const carryoverCtx = baselineVersion
-          ? {
-              baselineParser: baselineVersion.parser ?? '',
-              nextParser: finalParserName,
-              baselineText: baselineVersion.parsedText ?? '',
-              nextText: finalParsedText,
-              nextRanges: finalTextRanges,
-              dateOrder: templateSpec.dateOrder,
-            }
-          : null;
-
-        const finalizeValues: FinalizeValueInput[] = mergedResults.map((next) => {
-          const baseEntry = baselineByKey.get(next.fieldKey);
-          const baselineSnapshot: BaselineFieldSnapshot | null = baseEntry
-            ? {
-                id: baseEntry.value.id,
-                fieldKey: baseEntry.value.fieldKey,
-                fieldType: baseEntry.value.fieldType as FieldType,
-                kind: baseEntry.value.kind as ExtractedValueKind,
-                value: baseEntry.value.value as TypedValue | null,
-                canonicalEvidence: baseEntry.value.canonicalEvidence,
-                flags: baseEntry.value.flags as ValueFlag[],
-              }
-            : null;
-
-          const classification =
-            carryoverCtx && baselineSnapshot
-              ? classifyChange(baselineSnapshot, next, carryoverCtx)
-              : { changeKind: 'new' as const, changeReason: null };
-
-          const baseDecision = baseEntry?.currentReview?.decision as ReviewDecision | undefined;
-          const carriedReviewId =
-            baseEntry?.currentReview && baseDecision
-              ? decideCarry(classification, {
-                  id: baseEntry.currentReview.id,
-                  decision: baseDecision,
-                })
-              : null;
-
-          const carriedReview =
-            carriedReviewId &&
-            baseEntry?.currentReview &&
-            (baseDecision === 'approve' || baseDecision === 'correct')
-              ? {
-                  decision: baseDecision,
-                  correctedValue: baseEntry.currentReview.correctedValue as TypedValue | null,
-                  note: baseEntry.currentReview.note,
-                  carriedFromReviewId: carriedReviewId,
-                }
-              : null;
-
-          return {
-            fieldKey: next.fieldKey,
-            fieldType: next.fieldType,
-            kind: next.kind,
-            value: next.kind === 'value' ? next.value : null,
-            rawValue: next.rawValue,
-            evidence: next.kind === 'value' ? next.evidence : null,
-            attemptedQuote: next.kind === 'gap' ? next.attemptedQuote : null,
-            canonicalEvidence: next.kind === 'value' ? next.canonicalEvidence : null,
-            evidenceStart: next.evidenceStart,
-            evidenceEnd: next.evidenceEnd,
-            evidenceMatchCount: next.evidenceMatchCount,
-            citedLine: next.citedLine,
-            matchMode: next.matchMode,
-            chunkIndex: next.chunkIndex,
-            gapCode: next.kind === 'gap' ? next.gapCode : null,
-            gapReason: next.kind === 'gap' ? next.gapReason : null,
-            flags: [...next.flags],
-            baselineValueId: baseEntry?.value.id ?? null,
-            changeKind: classification.changeKind,
-            changeReason: classification.changeReason,
-            carriedReview,
-          };
-        });
-
-        return finalizeRun(tx, versionId, runId, {
+      const finalized = await withTx(this.db, (tx) =>
+        finalizeRun(tx, versionId, runId, {
           warnings: finalWarnings,
           chunked: isChunked,
           llmCallCount,
           reusedCallCount,
           costUsd: totalCostUsd.toFixed(6),
-          values: finalizeValues,
-        });
-      });
+          buildValues: async ({ tx: lockedTx, document, version: lockedVersion }) => {
+            const baselineVersion = await getBaselineExtractedVersion(
+              lockedTx,
+              document.id,
+              lockedVersion.versionNumber,
+            );
+
+            const baselineRows = baselineVersion
+              ? await listValuesForVersion(lockedTx, baselineVersion.id)
+              : [];
+            const baselineByKey = new Map(baselineRows.map((row) => [row.value.fieldKey, row]));
+
+            const carryoverCtx = baselineVersion
+              ? {
+                  baselineParser: baselineVersion.parser ?? '',
+                  nextParser: finalParserName,
+                  baselineText: baselineVersion.parsedText ?? '',
+                  nextText: finalParsedText,
+                  nextRanges: finalTextRanges,
+                  dateOrder: templateSpec.dateOrder,
+                }
+              : null;
+
+            return mergedResults.map((next): FinalizeValueInput => {
+              const baseEntry = baselineByKey.get(next.fieldKey);
+              const baselineSnapshot: BaselineFieldSnapshot | null = baseEntry
+                ? {
+                    id: baseEntry.value.id,
+                    fieldKey: baseEntry.value.fieldKey,
+                    fieldType: baseEntry.value.fieldType as FieldType,
+                    kind: baseEntry.value.kind as ExtractedValueKind,
+                    value: baseEntry.value.value as TypedValue | null,
+                    canonicalEvidence: baseEntry.value.canonicalEvidence,
+                    flags: baseEntry.value.flags as ValueFlag[],
+                  }
+                : null;
+
+              const classification =
+                carryoverCtx && baselineSnapshot
+                  ? classifyChange(baselineSnapshot, next, carryoverCtx)
+                  : { changeKind: 'new' as const, changeReason: null };
+
+              const baseDecision = baseEntry?.currentReview?.decision as ReviewDecision | undefined;
+              const carriedReviewId =
+                baseEntry?.currentReview && baseDecision
+                  ? decideCarry(classification, {
+                      id: baseEntry.currentReview.id,
+                      decision: baseDecision,
+                    })
+                  : null;
+
+              const carriedReview =
+                carriedReviewId &&
+                baseEntry?.currentReview &&
+                (baseDecision === 'approve' || baseDecision === 'correct')
+                  ? {
+                      decision: baseDecision,
+                      correctedValue: baseEntry.currentReview.correctedValue as TypedValue | null,
+                      note: baseEntry.currentReview.note,
+                      carriedFromReviewId: carriedReviewId,
+                    }
+                  : null;
+
+              return {
+                fieldKey: next.fieldKey,
+                fieldType: next.fieldType,
+                kind: next.kind,
+                value: next.kind === 'value' ? next.value : null,
+                rawValue: next.rawValue,
+                evidence: next.kind === 'value' ? next.evidence : null,
+                attemptedQuote: next.kind === 'gap' ? next.attemptedQuote : null,
+                canonicalEvidence: next.kind === 'value' ? next.canonicalEvidence : null,
+                evidenceStart: next.evidenceStart,
+                evidenceEnd: next.evidenceEnd,
+                evidenceMatchCount: next.evidenceMatchCount,
+                citedLine: next.citedLine,
+                matchMode: next.matchMode,
+                chunkIndex: next.chunkIndex,
+                gapCode: next.kind === 'gap' ? next.gapCode : null,
+                gapReason: next.kind === 'gap' ? next.gapReason : null,
+                flags: [...next.flags],
+                baselineValueId: baseEntry?.value.id ?? null,
+                changeKind: classification.changeKind,
+                changeReason: classification.changeReason,
+                carriedReview,
+              };
+            });
+          },
+        }),
+      );
 
       if (!finalized.ok) {
         return { status: 'aborted_fence', runId };
@@ -1055,7 +1063,12 @@ export class ExtractionPipeline {
       }
 
       if (err instanceof PermanentFailureError) {
-        await withTx(this.db, (tx) => failRun(tx, versionId, runId, err.code, err.message));
+        const didFail = await withTx(this.db, (tx) =>
+          failRun(tx, versionId, runId, err.code, err.message),
+        );
+        if (!didFail) {
+          return { status: 'aborted_fence', runId };
+        }
         return {
           status: 'failed_permanent',
           runId,
@@ -1065,9 +1078,12 @@ export class ExtractionPipeline {
       }
 
       if (err instanceof TransientReleaseError) {
-        await withTx(this.db, (tx) =>
+        const didRelease = await withTx(this.db, (tx) =>
           releaseRun(tx, versionId, runId, err.code, err.backoffMs, err.message),
         );
+        if (!didRelease) {
+          return { status: 'aborted_fence', runId };
+        }
         return {
           status: 'released_transient',
           runId,

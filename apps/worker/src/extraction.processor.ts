@@ -1,9 +1,8 @@
 import type { RunTrigger } from '@app/contracts/status';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
-import type { Job, Worker } from 'bullmq';
+import { Worker, type Job } from 'bullmq';
 import { LlmCircuitBreaker } from './circuit-breaker.js';
-import { resolveProcessorWorkerOptions } from './config.js';
 import { ExtractionPipeline } from './extraction-pipeline.js';
 
 export const EXTRACTION_QUEUE = 'extraction';
@@ -26,6 +25,17 @@ export class TransientJobRetryError extends Error {
   }
 }
 
+export function extractionBackoffStrategy(
+  attemptsMade: number,
+  _type?: string,
+  err?: Error,
+): number {
+  if (err instanceof TransientJobRetryError && Number.isFinite(err.backoffMs)) {
+    return Math.max(0, Math.trunc(err.backoffMs));
+  }
+  return 5_000 * 2 ** Math.max(0, attemptsMade - 1);
+}
+
 export function isBullMqMissingLockError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /missing lock/i.test(msg);
@@ -35,7 +45,7 @@ export function isBullMqMissingLockError(err: unknown): boolean {
  * Thin BullMQ processor delegating to `ExtractionPipeline` (spec §6 & §10).
  * Coordinates `worker.rateLimit`, circuit breaker pauses, and transient retries.
  */
-@Processor(EXTRACTION_QUEUE, resolveProcessorWorkerOptions())
+@Processor(EXTRACTION_QUEUE)
 export class ExtractionProcessor extends WorkerHost {
   private readonly logger = new Logger(ExtractionProcessor.name);
   private attachedWorker: Worker | null = null;
@@ -78,11 +88,8 @@ export class ExtractionProcessor extends WorkerHost {
     const remainingOpenMs = this.circuitBreaker.getRemainingOpenMs();
     if (remainingOpenMs > 0) {
       await this.applyRateLimit(remainingOpenMs);
-      throw new TransientJobRetryError(
-        'CIRCUIT_OPEN',
-        `LLM circuit breaker open for ${remainingOpenMs}ms`,
-        remainingOpenMs,
-      );
+      // Throw BullMQ's RateLimitError so the job moves back to wait without burning attemptsMade.
+      throw Worker.RateLimitError();
     }
 
     const outcome = await this.pipeline.run(job.data.versionId, {

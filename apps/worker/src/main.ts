@@ -7,7 +7,6 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.createApplicationContext(WorkerModule, {
     bufferLogs: false,
   });
-  app.enableShutdownHooks();
   registerGracefulShutdown(app);
 }
 

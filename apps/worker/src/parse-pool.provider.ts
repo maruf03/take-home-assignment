@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Optional, type OnApplicationShutdown } from '@nestjs/common';
 import {
   PdfParserPool,
   type PdfParseLimits,
@@ -9,8 +9,12 @@ import {
 
 export const PARSE_POOL_OPTIONS = Symbol('PARSE_POOL_OPTIONS');
 
+/**
+ * Implements `OnApplicationShutdown` (NOT `OnModuleDestroy`) so child parse workers stay alive
+ * while `BullExplorer.onModuleDestroy()` drains active BullMQ jobs before teardown.
+ */
 @Injectable()
-export class ParsePoolService implements PdfParser, OnModuleDestroy {
+export class ParsePoolService implements PdfParser, OnApplicationShutdown {
   private readonly pool: PdfParserPool;
 
   constructor(@Optional() @Inject(PARSE_POOL_OPTIONS) options?: PdfParserPoolOptions) {
@@ -29,7 +33,7 @@ export class ParsePoolService implements PdfParser, OnModuleDestroy {
     await this.pool.close();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  async onApplicationShutdown(): Promise<void> {
     await this.pool.close();
   }
 }
