@@ -21,9 +21,12 @@
     "test:chaos": "vitest run --passWithNoTests test/chaos"
   },
   "dependencies": {
-    "@app/contracts": "workspace:*"
+    "@app/contracts": "workspace:*",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/node": "^24.19.4",
+    "fast-check": "^4.11.0",
     "typescript": "^5.9.3",
     "vitest": "^5.1.2"
   }
