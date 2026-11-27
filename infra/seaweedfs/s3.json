@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "app",
+      "credentials": [
+        {
+          "accessKey": "dev-s3-key",
+          "secretKey": "dev-s3-secret"
+        }
+      ],
+      "actions": ["Admin", "Read:documents", "Write:documents", "List:documents"]
+    }
+  ]
+}

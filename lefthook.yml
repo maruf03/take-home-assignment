@@ -1,0 +1,24 @@
+pre-commit:
+  parallel: true
+  commands:
+    prettier:
+      glob: '*.{ts,tsx,js,jsx,mjs,cjs,json,yml,yaml,css}'
+      exclude: '^(fixtures/|fixtures-golden/|pnpm-lock\.yaml)'
+      run: pnpm exec prettier --check --ignore-unknown {staged_files}
+    eslint:
+      glob: '*.{ts,tsx,js,jsx,mjs,cjs}'
+      exclude: '^(fixtures/|fixtures-golden/)'
+      run: pnpm exec eslint --no-warn-ignored {staged_files}
+    db-check:
+      glob: 'packages/db/src/schema/**'
+      run: pnpm db:check
+
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm exec commitlint --edit {1}
+
+pre-push:
+  commands:
+    typecheck-and-test:
+      run: pnpm typecheck && pnpm test

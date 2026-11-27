@@ -1,0 +1,73 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "envMode": "strict",
+  "futureFlags": {
+    "pruneIncludesGlobalFiles": true
+  },
+  "globalDependencies": ["tsconfig.base.json", ".nvmrc"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "tsconfig*.json", "package.json"],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "test/**",
+        "$TURBO_ROOT$/fixtures-golden/**",
+        "$TURBO_ROOT$/eslint.config.js",
+        "$TURBO_ROOT$/commitlint.config.js"
+      ],
+      "outputs": ["coverage/**"]
+    },
+    "test:int": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": [
+        "APP_ENV",
+        "DATABASE_URL*",
+        "DATABASE_MIGRATOR_URL",
+        "REDIS_URL*",
+        "S3_*",
+        "AWS_*",
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "NODE_EXTRA_CA_CERTS"
+      ]
+    },
+    "test:chaos": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": [
+        "APP_ENV",
+        "DATABASE_URL*",
+        "DATABASE_MIGRATOR_URL",
+        "REDIS_URL*",
+        "S3_*",
+        "AWS_*",
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "NODE_EXTRA_CA_CERTS"
+      ]
+    },
+    "db:check": {
+      "cache": false
+    },
+    "mutation": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

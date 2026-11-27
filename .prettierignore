@@ -1,0 +1,15 @@
+dist/
+build/
+out/
+coverage/
+node_modules/
+.turbo/
+.superpowers/
+.worktrees/
+pnpm-lock.yaml
+fixtures/
+fixtures-golden/
+docs/history/
+*.md
+BRIEF.md
+jd.md
