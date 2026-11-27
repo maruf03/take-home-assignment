@@ -22,6 +22,7 @@
       "inputs": [
         "src/**",
         "test/**",
+        "$TURBO_ROOT$/fixtures/**",
         "$TURBO_ROOT$/fixtures-golden/**",
         "$TURBO_ROOT$/eslint.config.js",
         "$TURBO_ROOT$/commitlint.config.js"

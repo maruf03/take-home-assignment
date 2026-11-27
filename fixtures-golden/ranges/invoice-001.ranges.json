@@ -1,0 +1,14 @@
+{
+  "parser": "pdfjs-6.5.438/lines-1",
+  "pageCount": 1,
+  "pageOffsets": [
+    0
+  ],
+  "warnings": [
+    "MULTI_COLUMN"
+  ],
+  "textRanges": {
+    "hidden": [],
+    "lowVisibility": []
+  }
+}

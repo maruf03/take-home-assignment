@@ -1,0 +1,358 @@
+[
+  {
+    "pageNumber": 1,
+    "view": [
+      0,
+      0,
+      612,
+      792
+    ],
+    "items": [
+      {
+        "str": "RESIDENTIAL LEASE AGREEMENT (EXCERPT)",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          753.57
+        ],
+        "width": 222,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Premises: 1200 Harbor Street, Unit 4B, Eastport, CA 94701",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          725.22
+        ],
+        "width": 342,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "1. PARTIES. This Lease Agreement is entered into between Harborview",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          696.87
+        ],
+        "width": 402,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Residential LP (\"Landlord\") and Dana Okafor (\"Tenant\").",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          682.7
+        ],
+        "width": 330,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "2. TERM. The initial term of this Lease shall be twenty-four (24)",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          654.35
+        ],
+        "width": 390,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "months, commencing on March 1, 2025 and ending on February 28, 2027,",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          640.18
+        ],
+        "width": 408,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "unless terminated earlier in accordance with this Agreement.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          626.01
+        ],
+        "width": 360,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "3. RENT. Tenant shall pay Landlord monthly rent of $2,350.00, due on",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          597.66
+        ],
+        "width": 408,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "the first day of each calendar month. Rent received after the fifth",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          583.49
+        ],
+        "width": 402,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "day of the month is subject to a late charge of $75.00.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          569.31
+        ],
+        "width": 330,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "4. SECURITY DEPOSIT. Upon execution of this Agreement, Tenant shall",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          540.97
+        ],
+        "width": 402,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "deposit with Landlord the sum of $3,525.00 as a security deposit,",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          526.8
+        ],
+        "width": 390,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "to be",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          512.62
+        ],
+        "width": 30,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          61.18,
+          512.62
+        ],
+        "width": 6.000000000000007,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "held and disbursed in accordance with applicable law.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          67.18,
+          512.62
+        ],
+        "width": 318,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "5. UTILITIES. Tenant is responsible for electricity, gas, and",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          484.28
+        ],
+        "width": 366,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "internet service. Landlord pays for water, sewer, and refuse",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          470.1
+        ],
+        "width": 360,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "collection.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          455.93
+        ],
+        "width": 66,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "6. OCCUPANCY. The Premises shall be occupied solely by Tenant and",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          427.58
+        ],
+        "width": 390,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "one additional registered occupant. Subletting requires Landlord's",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          413.41
+        ],
+        "width": 396,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "prior",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          399.24
+        ],
+        "width": 30,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          61.18,
+          399.24
+        ],
+        "width": 6.000000000000007,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "written consent.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          67.18,
+          399.24
+        ],
+        "width": 96,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      }
+    ]
+  }
+]
