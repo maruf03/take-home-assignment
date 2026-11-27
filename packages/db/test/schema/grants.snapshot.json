@@ -1,0 +1,31 @@
+{
+  "tableGrants": [
+    { "table": "document_types", "privileges": ["SELECT"] },
+    { "table": "document_versions", "privileges": ["INSERT", "SELECT", "UPDATE"] },
+    { "table": "documents", "privileges": ["INSERT", "SELECT", "UPDATE"] },
+    { "table": "extracted_values", "privileges": ["INSERT", "SELECT"] },
+    { "table": "extraction_runs", "privileges": ["INSERT", "SELECT", "UPDATE"] },
+    { "table": "extraction_templates", "privileges": ["SELECT"] },
+    { "table": "llm_calls", "privileges": ["INSERT", "SELECT"] },
+    { "table": "reviews", "privileges": ["INSERT", "SELECT"] },
+    { "table": "template_fields", "privileges": ["SELECT"] }
+  ],
+  "columnUpdateGrants": {
+    "extracted_values": ["current_review_id"],
+    "llm_calls": [
+      "cost_usd",
+      "error_code",
+      "error_message",
+      "finished_at",
+      "input_tokens",
+      "latency_ms",
+      "output_tokens",
+      "provider_request_id",
+      "raw_response",
+      "schema_valid",
+      "served_model",
+      "stop_reason",
+      "usage"
+    ]
+  }
+}

@@ -47,7 +47,15 @@ describe('workspace config invariants', () => {
     );
     for (const taskName of ['test:int', 'test:chaos']) {
       expect(turbo.tasks[taskName]?.passThroughEnv).toEqual(
-        expect.arrayContaining(['APP_ENV', 'DATABASE_MIGRATOR_URL', 'LLM_PROVIDER', 'LLM_MODEL']),
+        expect.arrayContaining([
+          'APP_ENV',
+          'DATABASE_MIGRATOR_URL',
+          'DATABASE_ADMIN_URL',
+          'POSTGRES_USER',
+          'POSTGRES_PASSWORD',
+          'LLM_PROVIDER',
+          'LLM_MODEL',
+        ]),
       );
     }
   });

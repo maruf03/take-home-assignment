@@ -171,6 +171,14 @@ export function createEslintConfig() {
         'no-restricted-imports': [
           'error',
           {
+            paths: [
+              {
+                name: '@app/db',
+                importNames: ['documents'],
+                message:
+                  'Raw documents table queries are allowed only inside packages/db (spec §10.1).',
+              },
+            ],
             patterns: [
               {
                 group: [

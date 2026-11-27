@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
     }
   },
   "files": [
@@ -18,19 +22,23 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --passWithNoTests",
-    "test:int": "vitest run --passWithNoTests test/int",
+    "test": "vitest run --passWithNoTests test/unit",
+    "test:int": "vitest run test/schema",
     "test:chaos": "vitest run --passWithNoTests test/chaos",
-    "db:generate": "echo 'Drizzle schema is added in Core Task 3a' && exit 1",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "echo 'Migrate CLI is added in Core Task 3b' && exit 1",
     "db:seed": "echo 'Seed CLI is added in Core Task 3b' && exit 1",
-    "db:check": "echo 'Schema drift check is added in Core Task 3a'"
+    "db:check": "drizzle-kit check --config drizzle.config.ts && drizzle-kit generate --config drizzle.config.ts && env -u GIT_DIR -u GIT_WORK_TREE git diff --exit-code -- drizzle && test -z \"$(env -u GIT_DIR -u GIT_WORK_TREE git ls-files --others --exclude-standard -- drizzle)\""
   },
   "dependencies": {
-    "@app/contracts": "workspace:*"
+    "@app/contracts": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^24.19.4",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
     "typescript": "^5.9.3",
     "vitest": "^5.1.2"
   }

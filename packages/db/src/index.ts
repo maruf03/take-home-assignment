@@ -1,2 +1,3 @@
-// Drizzle schema, repositories, grants, and seed CLI are added in Core Tasks 3a and 3b.
+// Repositories and database client helpers are added in Core Task 3b.
+// Raw schema tables (especially `documents`) stay internal to @app/db (spec §10.1).
 export {};
