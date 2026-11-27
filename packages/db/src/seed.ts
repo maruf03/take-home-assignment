@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DateOrder, FieldType } from '@app/contracts/status';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { withTx, type AppDatabase } from './client.js';
 import { documents, documentVersions } from './schema/documents.js';
 import { documentTypes, extractionTemplates, templateFields } from './schema/templates.js';
@@ -177,6 +177,13 @@ export async function seedDatabase(
         set: { displayName },
       });
 
+      // Serialize concurrent seed processes per document type before reading/incrementing template versions.
+      await tx
+        .select({ key: documentTypes.key })
+        .from(documentTypes)
+        .where(eq(documentTypes.key, docTypeKey))
+        .for('update');
+
       const preparedFields: PreparedTemplateField[] = fieldsSpec.map((f, index) => {
         const fieldHint = typeHint?.fields[f.field];
         return {
@@ -213,9 +220,14 @@ export async function seedDatabase(
       const existingByShaRows = await tx
         .select()
         .from(extractionTemplates)
-        .where(eq(extractionTemplates.contentSha256, contentSha256))
+        .where(
+          and(
+            eq(extractionTemplates.documentType, docTypeKey),
+            eq(extractionTemplates.contentSha256, contentSha256),
+          ),
+        )
         .limit(1);
-      const existingBySha = existingByShaRows.find((r) => r.documentType === docTypeKey);
+      const existingBySha = existingByShaRows[0];
       if (existingBySha) {
         latestTemplateIdByType.set(docTypeKey, existingLatest?.id ?? existingBySha.id);
         continue;

@@ -1,10 +1,13 @@
 import type { Page } from '@app/contracts/page';
 import type { VersionStatus } from '@app/contracts/status';
+import { DOCUMENT_TYPE_KEY_REGEX_SOURCE } from '@app/contracts/values';
 import { and, asc, desc, eq, gt, isNull, sql, type SQL } from 'drizzle-orm';
-import { DbRepoError, type DbTx } from '../client.js';
+import { DbRepoError, type AppTransaction, type DbTx } from '../client.js';
 import { documents, documentVersions } from '../schema/documents.js';
 import { documentTypes, extractionTemplates, templateFields } from '../schema/templates.js';
 import { fingerprintFilters, isValidUuid, keyset, toPage } from './keyset.js';
+
+const DOCUMENT_TYPE_KEY_REGEX = new RegExp(DOCUMENT_TYPE_KEY_REGEX_SOURCE);
 
 export type DocumentRow = typeof documents.$inferSelect;
 export type DocumentVersionRow = typeof documentVersions.$inferSelect;
@@ -84,7 +87,7 @@ export interface CreateDocumentInput {
 }
 
 export async function createDocumentWithInitialVersion(
-  tx: DbTx,
+  tx: AppTransaction,
   input: CreateDocumentInput,
 ): Promise<{ document: DocumentRow; version: DocumentVersionRow }> {
   const typeRows = await tx
@@ -241,12 +244,21 @@ export async function listDocumentTypesWithTemplates(
     limit: params.limit,
     direction: 'asc',
     fingerprint: '',
+    validateKey: (k) => DOCUMENT_TYPE_KEY_REGEX.test(k),
   });
+
+  const hasTemplateCondition = sql`EXISTS (
+    SELECT 1 FROM extraction_templates et
+    WHERE et.document_type = ${documentTypes.key}
+  )`;
+  const whereExpr = ks.whereClause
+    ? and(hasTemplateCondition, ks.whereClause)
+    : hasTemplateCondition;
 
   const types = await tx
     .select()
     .from(documentTypes)
-    .where(ks.whereClause)
+    .where(whereExpr)
     .orderBy(asc(documentTypes.key))
     .limit(ks.limitPlusOne);
 

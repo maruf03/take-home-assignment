@@ -3,7 +3,7 @@ import type { Page } from '@app/contracts/page';
 import type { FieldType, ReviewDecision, ReviewOrigin } from '@app/contracts/status';
 import { equalValues, type TypedValue } from '@app/contracts/values';
 import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
-import { DbRepoError, type DbTx } from '../client.js';
+import { DbRepoError, type AppTransaction, type DbTx } from '../client.js';
 import { documents, documentVersions } from '../schema/documents.js';
 import { extractedValues, reviews } from '../schema/values.js';
 import { fingerprintFilters, isValidUuid, keyset, toPage } from './keyset.js';
@@ -75,7 +75,7 @@ export async function computeVersionProgress(
  * 7. Update documents.pending_count += delta ONLY if delta !== 0.
  */
 export async function insertReview(
-  tx: DbTx,
+  tx: AppTransaction,
   valueId: string,
   input: InsertReviewInput,
   requestId?: string | null,
@@ -172,19 +172,20 @@ export async function insertReview(
   const correctedValue = input.decision === 'correct' ? (input.correctedValue ?? null) : null;
 
   // 6. Identical human review is a no-op (spec §5.5).
+  // For strings, use exact equality so capitalization/spacing fixes are never discarded.
   if (
     currentReview !== null &&
     currentReview.origin === 'human' &&
     currentReview.decision === input.decision &&
     (currentReview.note ?? null) === normalizedNote
   ) {
+    const existingCorrected = (currentReview.correctedValue as TypedValue | null) ?? null;
+    const fieldType = val.fieldType as FieldType;
     const valueMatches =
       input.decision !== 'correct' ||
-      equalValues(
-        val.fieldType as FieldType,
-        (currentReview.correctedValue as TypedValue | null) ?? null,
-        correctedValue,
-      );
+      (fieldType === 'string'
+        ? existingCorrected === correctedValue
+        : equalValues(fieldType, existingCorrected, correctedValue));
     if (valueMatches) {
       const progress = await computeVersionProgress(tx, val.versionId, meta.versionNumber);
       return {

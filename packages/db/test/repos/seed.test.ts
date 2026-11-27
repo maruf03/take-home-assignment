@@ -37,7 +37,7 @@ describe('[R11] & [I7] idempotent database seed and template versioning', () => 
     await ctx.reset();
   });
 
-  it('[R11] seed.idempotent seeds 3 fixture documents (v1 only) idempotently and never resurrects deleted docs', async () => {
+  it('[R11] seed.idempotent & seed.template-hash-idempotent: seeds 3 fixture documents (v1 only) idempotently and never resurrects deleted docs', async () => {
     const blobs = new MemoryBlobStore();
 
     const first = await seedDatabase(ctx.migratorDb, blobs, {
@@ -149,5 +149,13 @@ describe('[R11] & [I7] idempotent database seed and template versioning', () => 
        WHERE d.external_id = 'doc-invoice-001' AND dv.version_number = 1`,
     );
     expect(v1Check.rows[0]!.template_id).toBe(v1TemplateId);
+
+    // Reverting hints back to v1's content_sha256 is a clean no-op (no 23505, v2 stays latest)
+    const res3 = await seedDatabase(ctx.migratorDb, blobs, {
+      fixturesDir: FIXTURES_DIR,
+      hintsPath: HINTS_PATH,
+    });
+    expect(res3.templatesCreated).toBe(0);
+    expect(res3.documentsCreated).toBe(0);
   });
 });

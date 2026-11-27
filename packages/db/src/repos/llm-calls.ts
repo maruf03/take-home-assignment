@@ -1,7 +1,7 @@
 import type { Page } from '@app/contracts/page';
 import type { LlmCallKind } from '@app/contracts/status';
 import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm';
-import type { DbTx } from '../client.js';
+import type { AppTransaction, DbTx } from '../client.js';
 import { documentVersions, llmCalls } from '../schema/documents.js';
 import { fingerprintFilters, isValidPositiveIntKey, keyset, toPage } from './keyset.js';
 
@@ -37,7 +37,7 @@ export interface InsertLlmCallInput {
  * Returns null if the worker has lost its lease.
  */
 export async function insertLlmCall(
-  tx: DbTx,
+  tx: AppTransaction,
   input: InsertLlmCallInput,
   runId: string,
 ): Promise<LlmCallRow | null> {
@@ -99,14 +99,26 @@ export interface CompleteLlmCallInput {
 
 /**
  * C2 fenced UPDATE of ONLY the column-granted response/usage columns on llm_calls (spec §8).
+ * Acquires FOR KEY SHARE on document_versions(id, active_run_id) first to serialize against
+ * concurrent sweep/fail/release/delete under READ COMMITTED (lock order: document_versions -> llm_calls).
  */
 export async function completeLlmCall(
-  tx: DbTx,
+  tx: AppTransaction,
   callId: string,
   versionId: string,
   runId: string,
   completion: CompleteLlmCallInput,
 ): Promise<boolean> {
+  const fenced = await tx
+    .select({ id: documentVersions.id })
+    .from(documentVersions)
+    .where(and(eq(documentVersions.id, versionId), eq(documentVersions.activeRunId, runId)))
+    .for('key share');
+
+  if (!fenced[0]) {
+    return false;
+  }
+
   const updated = await tx
     .update(llmCalls)
     .set({
@@ -125,14 +137,7 @@ export async function completeLlmCall(
       finishedAt: sql`now()`,
     })
     .where(
-      and(
-        eq(llmCalls.id, callId),
-        eq(llmCalls.runId, runId),
-        sql`EXISTS (
-          SELECT 1 FROM document_versions
-          WHERE id = ${versionId} AND active_run_id = ${runId}
-        )`,
-      ),
+      and(eq(llmCalls.id, callId), eq(llmCalls.versionId, versionId), eq(llmCalls.runId, runId)),
     )
     .returning({ id: llmCalls.id });
 

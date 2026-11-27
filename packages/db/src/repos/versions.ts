@@ -2,10 +2,9 @@ import type { TextRanges } from '@app/contracts/dto';
 import type { Page } from '@app/contracts/page';
 import type { VersionOrigin, VersionStatus, VersionWarning } from '@app/contracts/status';
 import { and, desc, eq, isNull, lt, sql, type SQL } from 'drizzle-orm';
-import { DbRepoError, type DbTx } from '../client.js';
+import { DbRepoError, type AppTransaction, type DbTx } from '../client.js';
 import { documents, documentVersions } from '../schema/documents.js';
 import {
-  getAliveDocumentOrThrow,
   getLatestTemplateForType,
   type DocumentRow,
   type DocumentVersionRow,
@@ -32,7 +31,7 @@ export interface CreateNewVersionResult {
  * lock documents FOR UPDATE -> content dedupe (non-failed, current template, upload) -> increment -> insert.
  */
 export async function createNewVersion(
-  tx: DbTx,
+  tx: AppTransaction,
   documentId: string,
   input: CreateNewVersionInput,
 ): Promise<CreateNewVersionResult> {
@@ -109,7 +108,7 @@ export async function createNewVersion(
 }
 
 export async function createReextractVersion(
-  tx: DbTx,
+  tx: AppTransaction,
   documentId: string,
   sourceVersionNumber: number,
   options: { reparse: boolean; requestId?: string | null },
@@ -237,14 +236,27 @@ export async function saveParsedText(
 }
 
 /**
- * Follows spec §3 Retry: resets retry budget `attempts=0` while leaving monotonic `run_seq` untouched.
+ * Follows spec §3 Retry: locks documents FOR KEY SHARE (preserving documents -> document_versions
+ * lock order and serializing against soft-delete), then locks document_versions FOR UPDATE and
+ * resets retry budget `attempts=0` while leaving monotonic `run_seq` untouched.
  */
 export async function retryVersion(
-  tx: DbTx,
+  tx: AppTransaction,
   documentId: string,
   versionNumber: number,
 ): Promise<DocumentVersionRow> {
-  await getAliveDocumentOrThrow(tx, documentId);
+  const lockedDocs = await tx
+    .select({ id: documents.id, deletedAt: documents.deletedAt })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .for('key share');
+  const doc = lockedDocs[0];
+  if (!doc) {
+    throw new DbRepoError('DOCUMENT_NOT_FOUND', `Document ${documentId} not found`);
+  }
+  if (doc.deletedAt !== null) {
+    throw new DbRepoError('DOCUMENT_DELETED', `Document ${documentId} has been deleted`);
+  }
 
   const locked = await tx
     .select()

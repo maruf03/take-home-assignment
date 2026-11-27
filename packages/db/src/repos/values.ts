@@ -10,7 +10,7 @@ import type {
 } from '@app/contracts/status';
 import type { TypedValue } from '@app/contracts/values';
 import { and, asc, eq, sql } from 'drizzle-orm';
-import type { DbTx } from '../client.js';
+import type { AppTransaction, DbTx } from '../client.js';
 import { documents, documentVersions, extractionRuns } from '../schema/documents.js';
 import { extractedValues, reviews } from '../schema/values.js';
 import { touch } from './touch.js';
@@ -74,14 +74,14 @@ export type FinalizeRunResult =
  * 1. Read immutable document_id (no lock)
  * 2. Lock documents FOR UPDATE (abort if deleted_at IS NOT NULL)
  * 3. Lock document_versions FOR UPDATE and verify active_run_id = runId AND status = 'extracting'
- * 4. INSERT extracted_values ... ON CONFLICT (version_id, field_key) DO NOTHING RETURNING *
- * 5. Insert carried reviews and update extracted_values.current_review_id
- * 6. Update document_versions (status = 'extracted', clear lease, extracted_at = now())
- * 7. Update extraction_runs (status = 'succeeded', counts, cost_usd, finished_at = now())
+ * 4. Update document_versions (status = 'extracted', clear lease, extracted_at = now())
+ * 5. Update extraction_runs (status = 'succeeded', counts, cost_usd, finished_at = now())
+ * 6. INSERT extracted_values ... ON CONFLICT (version_id, field_key) DO NOTHING RETURNING *
+ * 7. Insert carried reviews and update extracted_values.current_review_id
  * 8. Move documents.reviewable_version_id iff newer, recomputing pending_count absolutely.
  */
 export async function finalizeRun(
-  tx: DbTx,
+  tx: AppTransaction,
   versionId: string,
   runId: string,
   input: FinalizeRunInput,
@@ -115,7 +115,34 @@ export async function finalizeRun(
     return { ok: false, reason: 'fenced' };
   }
 
-  // 4. Bulk insert extracted values idempotently.
+  // 4. Mark version extracted and clear lease (fenced).
+  await tx
+    .update(documentVersions)
+    .set({
+      status: 'extracted',
+      activeRunId: null,
+      leaseUntil: null,
+      workerId: null,
+      warnings: input.warnings,
+      extractedAt: sql`now()`,
+      ...touch(),
+    })
+    .where(and(eq(documentVersions.id, versionId), eq(documentVersions.activeRunId, runId)));
+
+  // 5. Complete extraction run (strict lock order: document_versions -> extraction_runs -> extracted_values -> reviews).
+  await tx
+    .update(extractionRuns)
+    .set({
+      status: 'succeeded',
+      chunked: input.chunked,
+      llmCallCount: input.llmCallCount,
+      reusedCallCount: input.reusedCallCount,
+      costUsd: input.costUsd,
+      finishedAt: sql`now()`,
+    })
+    .where(and(eq(extractionRuns.id, runId), eq(extractionRuns.status, 'running')));
+
+  // 6. Bulk insert extracted values idempotently.
   const insertedRows: ExtractedValueRow[] =
     input.values.length > 0
       ? await tx
@@ -152,7 +179,7 @@ export async function finalizeRun(
           .returning()
       : [];
 
-  // 5. Insert carried reviews for newly inserted values and link current_review_id.
+  // 7. Insert carried reviews for newly inserted values and link current_review_id.
   const inputByFieldKey = new Map<string, FinalizeValueInput>();
   for (const item of input.values) {
     inputByFieldKey.set(item.fieldKey, item);
@@ -183,33 +210,6 @@ export async function finalizeRun(
       .where(eq(extractedValues.id, row.id));
   }
 
-  // 6. Mark version extracted and clear lease (fenced).
-  await tx
-    .update(documentVersions)
-    .set({
-      status: 'extracted',
-      activeRunId: null,
-      leaseUntil: null,
-      workerId: null,
-      warnings: input.warnings,
-      extractedAt: sql`now()`,
-      ...touch(),
-    })
-    .where(and(eq(documentVersions.id, versionId), eq(documentVersions.activeRunId, runId)));
-
-  // 7. Complete extraction run.
-  await tx
-    .update(extractionRuns)
-    .set({
-      status: 'succeeded',
-      chunked: input.chunked,
-      llmCallCount: input.llmCallCount,
-      reusedCallCount: input.reusedCallCount,
-      costUsd: input.costUsd,
-      finishedAt: sql`now()`,
-    })
-    .where(and(eq(extractionRuns.id, runId), eq(extractionRuns.status, 'running')));
-
   // 8. Move reviewable_version_id iff this version is newer than the current reviewable version.
   let shouldMovePointer = doc.reviewableVersionId === null;
   if (!shouldMovePointer && doc.reviewableVersionId !== null) {
@@ -222,22 +222,23 @@ export async function finalizeRun(
     shouldMovePointer = ver.versionNumber > currentNumber;
   }
 
-  // Recompute pending_count absolutely from source rows for the version now pointed to.
-  const countRes = await tx.execute<{ pending_count: number }>(sql`
-    SELECT COUNT(*)::int AS pending_count
-    FROM extracted_values v
-    LEFT JOIN reviews r ON r.id = v.current_review_id
-    WHERE v.version_id = ${versionId}
-      AND (v.current_review_id IS NULL OR r.decision = 'revert')
-  `);
-  const versionPendingCount = countRes.rows[0]?.pending_count ?? 0;
-
+  let pendingCount = doc.pendingCount;
   if (shouldMovePointer) {
+    // Recompute pending_count absolutely from source rows only when moving the reviewable pointer.
+    const countRes = await tx.execute<{ pending_count: number }>(sql`
+      SELECT COUNT(*)::int AS pending_count
+      FROM extracted_values v
+      LEFT JOIN reviews r ON r.id = v.current_review_id
+      WHERE v.version_id = ${versionId}
+        AND (v.current_review_id IS NULL OR r.decision = 'revert')
+    `);
+    pendingCount = countRes.rows[0]?.pending_count ?? 0;
+
     await tx
       .update(documents)
       .set({
         reviewableVersionId: versionId,
-        pendingCount: versionPendingCount,
+        pendingCount,
         ...touch(),
       })
       .where(eq(documents.id, docId));
@@ -246,7 +247,7 @@ export async function finalizeRun(
   return {
     ok: true,
     pointerMoved: shouldMovePointer,
-    pendingCount: shouldMovePointer ? versionPendingCount : doc.pendingCount,
+    pendingCount,
     insertedCount: insertedRows.length,
   };
 }

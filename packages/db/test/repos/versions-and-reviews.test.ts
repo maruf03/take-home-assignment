@@ -1,11 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DbRepoError, withTx } from '../../src/client.js';
-import { createDocumentWithInitialVersion, listAliveDocuments } from '../../src/repos/documents.js';
+import { DbRepoError, withReadOnlyTx, withTx } from '../../src/client.js';
+import {
+  countNeedsReviewFacets,
+  createDocumentWithInitialVersion,
+  listAliveDocuments,
+  listDocumentTypesWithTemplates,
+} from '../../src/repos/documents.js';
 import { decodeCursor, encodeCursor, toPage } from '../../src/repos/keyset.js';
 import { insertReview, listReviewsForValue } from '../../src/repos/reviews.js';
 import { claimVersion, failRun } from '../../src/repos/runs.js';
-import { finalizeRun } from '../../src/repos/values.js';
-import { createNewVersion, saveParsedText } from '../../src/repos/versions.js';
+import { finalizeRun, listValuesForVersion } from '../../src/repos/values.js';
+import { createNewVersion, listVersions, saveParsedText } from '../../src/repos/versions.js';
 import { withTemplateDb, type TemplateDbHandle } from '../../src/testing/template-db.js';
 
 const HEX64_1 = '1'.repeat(64);
@@ -297,5 +302,329 @@ describe('versions dedupe, finalize, reviews delta/conflict, and keyset paginati
     const page = toPage([{ id: 'a' }, { id: 'b' }, { id: 'c' }], 2, (r) => r.id, 'fp');
     expect(page.data).toHaveLength(2);
     expect(page.page.hasMore).toBe(true);
+
+    // Long externalId filter (128 chars) produces a valid cursor under 128-char schema limit
+    const longExternalId = 'e'.repeat(128);
+    await withTx(ctx.appDb, (tx) =>
+      createDocumentWithInitialVersion(tx, {
+        externalId: longExternalId,
+        type: 'invoice',
+        title: 'Long ext',
+        storageKey: `pdfs/sha256/${HEX64_1}.pdf`,
+        fileSha256: HEX64_1,
+        fileSizeBytes: 100,
+        originalFilename: 'long.pdf',
+      }),
+    );
+    const longPage = await withReadOnlyTx(ctx.appDb, (tx) =>
+      listAliveDocuments(tx, {
+        limit: 1,
+        externalId: longExternalId,
+        type: 'invoice',
+        needsReview: false,
+        status: 'queued',
+      }),
+    );
+    expect(longPage.data).toHaveLength(1);
+
+    // > INT4_MAX integer cursor rejected with 400 INVALID_CURSOR (not Postgres 500)
+    const overflowCursor = encodeCursor({ v: 1, k: '2147483648', d: 'next', f: '' });
+    await expect(
+      withReadOnlyTx(ctx.appDb, (tx) => listVersions(tx, ids[0]!, { cursor: overflowCursor })),
+    ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+
+    // Facets and document types listing
+    const facets = await withReadOnlyTx(ctx.appDb, (tx) => countNeedsReviewFacets(tx));
+    expect(facets).toEqual({ count: 0, capped: false });
+
+    const typesPage = await withReadOnlyTx(ctx.appDb, (tx) => listDocumentTypesWithTemplates(tx));
+    expect(typesPage.data).toHaveLength(1);
+    expect(typesPage.data[0]?.key).toBe('invoice');
+    expect(typesPage.data[0]?.template.fields).toHaveLength(2);
+  });
+
+  it('[R4] db.finalize-twice-noop, carried reviews, gaps, out-of-order pointer, fencing, and full review lifecycle', async () => {
+    const created = await withTx(ctx.appDb, (tx) =>
+      createDocumentWithInitialVersion(tx, {
+        type: 'invoice',
+        title: 'Invoice V1/V2',
+        storageKey: `pdfs/sha256/${HEX64_1}.pdf`,
+        fileSha256: HEX64_1,
+        fileSizeBytes: 512,
+        originalFilename: 'v1.pdf',
+      }),
+    );
+    const v2Created = await withTx(ctx.appDb, (tx) =>
+      createNewVersion(tx, created.document.id, {
+        storageKey: `pdfs/sha256/${HEX64_2}.pdf`,
+        fileSha256: HEX64_2,
+        fileSizeBytes: 512,
+        originalFilename: 'v2.pdf',
+      }),
+    );
+
+    // Claim both v1 and v2, parse both
+    const run1 = await withTx(ctx.appDb, (tx) => claimVersion(tx, created.version.id, 'w1'));
+    const run2 = await withTx(ctx.appDb, (tx) => claimVersion(tx, v2Created.version.id, 'w2'));
+    for (const [verId, rId] of [
+      [created.version.id, run1!.runId],
+      [v2Created.version.id, run2!.runId],
+    ] as const) {
+      await withTx(ctx.appDb, (tx) =>
+        saveParsedText(tx, verId, rId, {
+          parsedText: 'acme corp\nTotal: $100.00',
+          parsedTextSha256: HEX64_2,
+          parser: 'lines/1',
+          pageOffsets: [0],
+          textRanges: { hidden: [], lowVisibility: [] },
+          warnings: [],
+        }),
+      );
+    }
+
+    // Stale runId finalize fails safely
+    const fencedFin = await withTx(ctx.appDb, (tx) =>
+      finalizeRun(tx, v2Created.version.id, run1!.runId, {
+        warnings: [],
+        chunked: false,
+        llmCallCount: 1,
+        reusedCallCount: 0,
+        costUsd: '0.001000',
+        values: [],
+      }),
+    );
+    expect(fencedFin).toEqual({ ok: false, reason: 'fenced' });
+
+    // Finalize v2 FIRST (with 1 value + 1 gap with attemptedQuote) -> pointer moves to v2, pendingCount = 2
+    const fin2 = await withTx(ctx.appDb, (tx) =>
+      finalizeRun(tx, v2Created.version.id, run2!.runId, {
+        warnings: [],
+        chunked: false,
+        llmCallCount: 1,
+        reusedCallCount: 0,
+        costUsd: '0.001000',
+        values: [
+          {
+            fieldKey: 'vendor_name',
+            fieldType: 'string',
+            kind: 'value',
+            value: 'acme corp',
+            rawValue: 'acme corp',
+            evidence: 'acme corp',
+            canonicalEvidence: 'acme corp',
+            evidenceStart: 0,
+            evidenceEnd: 9,
+            evidenceMatchCount: 1,
+            citedLine: 1,
+            matchMode: 'strict',
+            flags: [],
+            changeKind: 'new',
+          },
+          {
+            fieldKey: 'total_amount',
+            fieldType: 'money',
+            kind: 'gap',
+            attemptedQuote: '$999',
+            gapCode: 'EVIDENCE_NOT_IN_TEXT',
+            gapReason: 'Quote not found in text',
+            flags: [],
+            changeKind: 'new',
+          },
+        ],
+      }),
+    );
+    expect(fin2).toEqual({ ok: true, pointerMoved: true, pendingCount: 2, insertedCount: 2 });
+
+    // Finalizing v2 a second time returns fenced (already extracted)
+    const fin2Again = await withTx(ctx.appDb, (tx) =>
+      finalizeRun(tx, v2Created.version.id, run2!.runId, {
+        warnings: [],
+        chunked: false,
+        llmCallCount: 1,
+        reusedCallCount: 0,
+        costUsd: '0.001000',
+        values: [],
+      }),
+    );
+    expect(fin2Again).toEqual({ ok: false, reason: 'fenced' });
+
+    // Approve vendor_name on v2, then test string capitalization correction (MUST NOT be no-op!)
+    const v2Vals = await withReadOnlyTx(ctx.appDb, (tx) =>
+      listValuesForVersion(tx, v2Created.version.id),
+    );
+    const vendorVal = v2Vals.find((r) => r.value.fieldKey === 'vendor_name')!.value;
+
+    const c1 = await withTx(ctx.appDb, (tx) =>
+      insertReview(tx, vendorVal.id, { decision: 'correct', correctedValue: 'acme corp' }, 'r-1'),
+    );
+    expect(c1.delta).toBe(-1);
+    expect(c1.noop).toBe(false);
+
+    const c2 = await withTx(ctx.appDb, (tx) =>
+      insertReview(tx, vendorVal.id, { decision: 'correct', correctedValue: 'Acme Corp' }, 'r-2'),
+    );
+    expect(c2.noop).toBe(false);
+    expect(c2.delta).toBe(0);
+    expect(c2.review.correctedValue).toBe('Acme Corp');
+
+    // Missing correctedValue on 'correct' -> 422 INVALID_CORRECTION
+    await expect(
+      withTx(ctx.appDb, (tx) => insertReview(tx, vendorVal.id, { decision: 'correct' }, 'r-bad')),
+    ).rejects.toMatchObject({ code: 'INVALID_CORRECTION' });
+
+    // Revert -> delta = +1, pending back to 2; reverting again -> 409 NOTHING_TO_REVERT
+    const rev = await withTx(ctx.appDb, (tx) =>
+      insertReview(tx, vendorVal.id, { decision: 'revert' }, 'r-3'),
+    );
+    expect(rev.delta).toBe(1);
+    expect(rev.progress.pending).toBe(2);
+
+    await expect(
+      withTx(ctx.appDb, (tx) => insertReview(tx, vendorVal.id, { decision: 'revert' }, 'r-4')),
+    ).rejects.toMatchObject({ code: 'NOTHING_TO_REVERT' });
+
+    // Re-approve so v2 has pendingCount = 1 before out-of-order v1 finishes
+    const v2Approved = await withTx(ctx.appDb, (tx) =>
+      insertReview(tx, vendorVal.id, { decision: 'approve' }, 'r-5'),
+    );
+
+    // Out-of-order v1 finishes AFTER v2 -> pointerMoved MUST be false and pendingCount stays 1
+    const fin1 = await withTx(ctx.appDb, (tx) =>
+      finalizeRun(tx, created.version.id, run1!.runId, {
+        warnings: [],
+        chunked: false,
+        llmCallCount: 1,
+        reusedCallCount: 0,
+        costUsd: '0.001000',
+        values: [
+          {
+            fieldKey: 'vendor_name',
+            fieldType: 'string',
+            kind: 'value',
+            value: 'acme corp',
+            rawValue: 'acme corp',
+            evidence: 'acme corp',
+            canonicalEvidence: 'acme corp',
+            evidenceStart: 0,
+            evidenceEnd: 9,
+            evidenceMatchCount: 1,
+            citedLine: 1,
+            matchMode: 'strict',
+            flags: [],
+            changeKind: 'new',
+          },
+        ],
+      }),
+    );
+    expect(fin1).toEqual({ ok: true, pointerMoved: false, pendingCount: 1, insertedCount: 1 });
+
+    // Attempting to review non-reviewable v1 throws 409 VERSION_NOT_REVIEWABLE
+    const v1Vals = await withReadOnlyTx(ctx.appDb, (tx) =>
+      listValuesForVersion(tx, created.version.id),
+    );
+    await expect(
+      withTx(ctx.appDb, (tx) =>
+        insertReview(tx, v1Vals[0]!.value.id, { decision: 'approve' }, 'r-old'),
+      ),
+    ).rejects.toMatchObject({ code: 'VERSION_NOT_REVIEWABLE' });
+
+    // Create v3 carrying v2's approved review -> carried_over count = 1, pending = 0; human approve over carried is NOT no-op and delta = 0
+    const v3Created = await withTx(ctx.appDb, (tx) =>
+      createNewVersion(tx, created.document.id, {
+        storageKey: `pdfs/sha256/${HEX64_1}.pdf`,
+        fileSha256: HEX64_1,
+        fileSizeBytes: 512,
+        originalFilename: 'v3.pdf',
+      }),
+    );
+    const run3 = await withTx(ctx.appDb, (tx) => claimVersion(tx, v3Created.version.id, 'w3'));
+    await withTx(ctx.appDb, (tx) =>
+      saveParsedText(tx, v3Created.version.id, run3!.runId, {
+        parsedText: 'acme corp',
+        parsedTextSha256: HEX64_2,
+        parser: 'lines/1',
+        pageOffsets: [0],
+        textRanges: { hidden: [], lowVisibility: [] },
+        warnings: [],
+      }),
+    );
+    const fin3 = await withTx(ctx.appDb, (tx) =>
+      finalizeRun(tx, v3Created.version.id, run3!.runId, {
+        warnings: [],
+        chunked: false,
+        llmCallCount: 1,
+        reusedCallCount: 0,
+        costUsd: '0.001000',
+        values: [
+          {
+            fieldKey: 'vendor_name',
+            fieldType: 'string',
+            kind: 'value',
+            value: 'acme corp',
+            rawValue: 'acme corp',
+            evidence: 'acme corp',
+            canonicalEvidence: 'acme corp',
+            evidenceStart: 0,
+            evidenceEnd: 9,
+            evidenceMatchCount: 1,
+            citedLine: 1,
+            matchMode: 'strict',
+            flags: [],
+            baselineValueId: vendorVal.id,
+            changeKind: 'same',
+            carriedReview: {
+              decision: 'approve',
+              carriedFromReviewId: v2Approved.review.id,
+            },
+          },
+        ],
+      }),
+    );
+    expect(fin3).toEqual({ ok: true, pointerMoved: true, pendingCount: 0, insertedCount: 1 });
+
+    const v3Vals = await withReadOnlyTx(ctx.appDb, (tx) =>
+      listValuesForVersion(tx, v3Created.version.id),
+    );
+    expect(v3Vals[0]?.currentReview?.origin).toBe('carried');
+
+    const humanOverCarried = await withTx(ctx.appDb, (tx) =>
+      insertReview(tx, v3Vals[0]!.value.id, { decision: 'approve' }, 'r-human'),
+    );
+    expect(humanOverCarried.noop).toBe(false);
+    expect(humanOverCarried.delta).toBe(0);
+    expect(humanOverCarried.progress.approved).toBe(1);
+    expect(humanOverCarried.progress.carriedOver).toBe(0);
+
+    // Soft-delete document -> finalizeRun returns document_deleted and insertReview throws 410 DOCUMENT_DELETED (precedence over 409)
+    const v4Created = await withTx(ctx.appDb, (tx) =>
+      createNewVersion(tx, created.document.id, {
+        storageKey: `pdfs/sha256/${HEX64_2}.pdf`,
+        fileSha256: HEX64_2,
+        fileSizeBytes: 512,
+        originalFilename: 'v4.pdf',
+      }),
+    );
+    const run4 = await withTx(ctx.appDb, (tx) => claimVersion(tx, v4Created.version.id, 'w4'));
+    await ctx.migratorPool.query(`UPDATE documents SET deleted_at = now() WHERE id = $1`, [
+      created.document.id,
+    ]);
+
+    const delFin = await withTx(ctx.appDb, (tx) =>
+      finalizeRun(tx, v4Created.version.id, run4!.runId, {
+        warnings: [],
+        chunked: false,
+        llmCallCount: 0,
+        reusedCallCount: 0,
+        costUsd: '0',
+        values: [],
+      }),
+    );
+    expect(delFin).toEqual({ ok: false, reason: 'document_deleted' });
+
+    await expect(
+      withTx(ctx.appDb, (tx) =>
+        insertReview(tx, v1Vals[0]!.value.id, { decision: 'approve' }, 'r-del'),
+      ),
+    ).rejects.toMatchObject({ code: 'DOCUMENT_DELETED' });
   });
 });

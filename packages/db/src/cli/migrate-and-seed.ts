@@ -9,6 +9,7 @@ import {
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { createDb, createPool } from '../client.js';
 import { seedDatabase, type SeedBlobStore } from '../seed.js';
+import { parseMigrateCliConfig } from './config.js';
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, '..', '..');
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
@@ -36,7 +37,7 @@ class S3SeedBlobStore implements SeedBlobStore {
   private readonly bucket: string;
 
   constructor(config: {
-    endpoint: string;
+    endpoint?: string;
     region: string;
     bucket: string;
     accessKeyId: string;
@@ -44,9 +45,8 @@ class S3SeedBlobStore implements SeedBlobStore {
   }) {
     this.bucket = config.bucket;
     this.client = new S3Client({
-      endpoint: config.endpoint,
+      ...(config.endpoint ? { endpoint: config.endpoint, forcePathStyle: true } : {}),
       region: config.region,
-      forcePathStyle: true,
       requestChecksumCalculation: 'WHEN_REQUIRED',
       responseChecksumValidation: 'WHEN_REQUIRED',
       credentials: {
@@ -96,16 +96,9 @@ class S3SeedBlobStore implements SeedBlobStore {
 
 async function main(): Promise<void> {
   const migrateOnly = process.argv.includes('--migrate-only');
-  const appEnv = process.env['APP_ENV'] ?? 'development';
+  const cfg = parseMigrateCliConfig(process.env, migrateOnly);
 
-  const migratorUrl =
-    process.env['DATABASE_MIGRATOR_URL'] ??
-    (appEnv === 'production' ? '' : 'postgresql://migrator:dev-migrator@127.0.0.1:5432/lomi');
-  if (!migratorUrl) {
-    throw new Error('DATABASE_MIGRATOR_URL is required in production');
-  }
-
-  const pool = createPool(migratorUrl, { max: 2 });
+  const pool = createPool(cfg.migratorUrl, { max: 2 });
   const db = createDb(pool);
 
   try {
@@ -113,30 +106,13 @@ async function main(): Promise<void> {
     const grantsSql = await readFile(GRANTS_SQL_PATH, 'utf8');
     await pool.query(grantsSql);
 
-    if (migrateOnly) {
+    if (migrateOnly || !cfg.s3) {
       console.log('Migrations and least-privilege grants applied.');
       return;
     }
 
-    const s3Endpoint = process.env['S3_ENDPOINT'] ?? 'http://127.0.0.1:8333';
-    const s3Region = process.env['S3_REGION'] ?? 'us-east-1';
-    const s3Bucket = process.env['S3_BUCKET'] ?? 'documents';
-    const s3AccessKey =
-      process.env['S3_ACCESS_KEY'] ?? (appEnv === 'production' ? '' : 'dev-s3-key');
-    const s3SecretKey =
-      process.env['S3_SECRET_KEY'] ?? (appEnv === 'production' ? '' : 'dev-s3-secret');
-    if (!s3AccessKey || !s3SecretKey) {
-      throw new Error('S3_ACCESS_KEY and S3_SECRET_KEY are required in production');
-    }
-
-    const fixturesDir = process.env['FIXTURES_DIR'] ?? path.join(REPO_ROOT, 'fixtures');
-    const blobStore = new S3SeedBlobStore({
-      endpoint: s3Endpoint,
-      region: s3Region,
-      bucket: s3Bucket,
-      accessKeyId: s3AccessKey,
-      secretAccessKey: s3SecretKey,
-    });
+    const fixturesDir = cfg.fixturesDir ?? path.join(REPO_ROOT, 'fixtures');
+    const blobStore = new S3SeedBlobStore(cfg.s3);
 
     try {
       const summary = await seedDatabase(db, blobStore, {
@@ -154,4 +130,7 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+main().catch((err: unknown) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exitCode = 1;
+});

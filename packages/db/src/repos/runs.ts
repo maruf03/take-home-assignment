@@ -1,8 +1,8 @@
 import type { Page } from '@app/contracts/page';
 import type { VersionErrorCode } from '@app/contracts/problems';
 import type { RunStatus, RunTrigger } from '@app/contracts/status';
-import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
-import type { DbTx } from '../client.js';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import type { AppTransaction, DbTx } from '../client.js';
 import { documentVersions, extractionRuns } from '../schema/documents.js';
 import { fingerprintFilters, isValidPositiveIntKey, keyset, toPage } from './keyset.js';
 import { touch } from './touch.js';
@@ -33,12 +33,12 @@ const DEFAULT_SWEEP_COOLDOWN_SECONDS = 10;
  * 4. UPDATE document_versions (status = 'extracting', active_run_id, lease_until, worker_id, attempts + 1)
  */
 export async function claimVersion(
-  tx: DbTx,
+  tx: AppTransaction,
   versionId: string,
   workerId: string,
   options: ClaimVersionOptions = {},
 ): Promise<ClaimResult | null> {
-  const leaseSeconds = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
+  const leaseSeconds = Math.max(1, Math.trunc(options.leaseSeconds ?? DEFAULT_LEASE_SECONDS));
   const trigger = options.trigger ?? 'upload';
 
   const locked = await tx
@@ -100,10 +100,11 @@ export async function heartbeat(
   runId: string,
   leaseSeconds = DEFAULT_LEASE_SECONDS,
 ): Promise<boolean> {
+  const safeLeaseSeconds = Math.max(1, Math.trunc(leaseSeconds));
   const updated = await tx
     .update(documentVersions)
     .set({
-      leaseUntil: sql`now() + (${leaseSeconds} * interval '1 second')`,
+      leaseUntil: sql`now() + (${safeLeaseSeconds} * interval '1 second')`,
       ...touch(),
     })
     .where(and(eq(documentVersions.id, versionId), eq(documentVersions.activeRunId, runId)))
@@ -116,7 +117,7 @@ export async function heartbeat(
  * Fenced permanent failure (spec §3 Fail).
  */
 export async function failRun(
-  tx: DbTx,
+  tx: AppTransaction,
   versionId: string,
   runId: string,
   code: VersionErrorCode,
@@ -158,7 +159,7 @@ export async function failRun(
  * so a BullMQ delayed retry (or sweep after backoff) can claim without hitting 'extracting'.
  */
 export async function releaseRun(
-  tx: DbTx,
+  tx: AppTransaction,
   versionId: string,
   runId: string,
   code: string,
@@ -201,7 +202,7 @@ export async function releaseRun(
  * Sweep step 1 (boot only): release leases held by this workerId and mark runs abandoned.
  * Never touches `documents` (spec §3, §6).
  */
-export async function sweepBootRelease(tx: DbTx, workerId: string): Promise<string[]> {
+export async function sweepBootRelease(tx: AppTransaction, workerId: string): Promise<string[]> {
   const locked = await tx
     .select({
       id: documentVersions.id,
@@ -246,7 +247,7 @@ export async function sweepBootRelease(tx: DbTx, workerId: string): Promise<stri
 /**
  * Sweep step 2: release expired leases (lease_until < now()) and mark runs abandoned (spec §6).
  */
-export async function sweepExpired(tx: DbTx): Promise<string[]> {
+export async function sweepExpired(tx: AppTransaction): Promise<string[]> {
   const locked = await tx
     .select({
       id: documentVersions.id,
@@ -319,7 +320,7 @@ export interface SweepCandidate {
  * (skipping future backoff timestamps), stamp enqueued_at = now(), and return them for BullMQ enqueue.
  */
 export async function sweepCandidates(
-  tx: DbTx,
+  tx: AppTransaction,
   limit = DEFAULT_SWEEP_LIMIT,
   cooldownSeconds = DEFAULT_SWEEP_COOLDOWN_SECONDS,
 ): Promise<SweepCandidate[]> {
@@ -339,6 +340,7 @@ export async function sweepCandidates(
         ),
       ),
     )
+    .orderBy(sql`${documentVersions.enqueuedAt} ASC NULLS FIRST`, asc(documentVersions.id))
     .limit(limit)
     .for('update', { skipLocked: true });
 

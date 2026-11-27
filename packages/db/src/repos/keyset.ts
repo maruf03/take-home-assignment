@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   cursorPayloadSchema,
   DEFAULT_PAGE_LIMIT,
@@ -12,13 +13,18 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { DbRepoError } from '../client.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PG_INT4_MAX = 2_147_483_647;
 
 export function isValidUuid(value: string): boolean {
   return UUID_REGEX.test(value);
 }
 
 export function isValidPositiveIntKey(value: string): boolean {
-  return /^[1-9][0-9]*$/.test(value);
+  if (!/^[1-9][0-9]{0,9}$/.test(value)) {
+    return false;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= PG_INT4_MAX;
 }
 
 export function fingerprintFilters(filters: Record<string, unknown>): string {
@@ -28,7 +34,7 @@ export function fingerprintFilters(filters: Record<string, unknown>): string {
   if (entries.length === 0) {
     return '';
   }
-  return entries.map(([k, v]) => `${k}=${String(v)}`).join('&');
+  return createHash('sha256').update(JSON.stringify(entries), 'utf8').digest('hex').slice(0, 32);
 }
 
 export function encodeCursor(payload: CursorPayload): string {
