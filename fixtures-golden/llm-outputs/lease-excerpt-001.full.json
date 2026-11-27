@@ -1,0 +1,45 @@
+{
+  "fields": {
+    "tenant_name": {
+      "found": true,
+      "value": "Dana Okafor",
+      "quote": "Residential LP (\"Landlord\") and Dana Okafor (\"Tenant\").",
+      "line": 4,
+      "not_found_reason": ""
+    },
+    "monthly_rent": {
+      "found": true,
+      "amount": "2350.00",
+      "currency": "USD",
+      "quote": "3. RENT. Tenant shall pay Landlord monthly rent of $2,350.00, due on",
+      "line": 8,
+      "not_found_reason": ""
+    },
+    "security_deposit": {
+      "found": true,
+      "amount": "3525.00",
+      "currency": "USD",
+      "quote": "deposit with Landlord the sum of $3,525.00 as a security deposit,",
+      "line": 12,
+      "not_found_reason": ""
+    },
+    "lease_start": {
+      "found": true,
+      "value": "March 1, 2025",
+      "quote": "months, commencing on March 1, 2025 and ending on February 28, 2027,",
+      "line": 6,
+      "not_found_reason": ""
+    },
+    "term_months": {
+      "found": true,
+      "value": "24",
+      "quote": "2. TERM. The initial term of this Lease shall be twenty-four (24)",
+      "line": 5,
+      "not_found_reason": ""
+    }
+  },
+  "document_flags": {
+    "suspicious_instructions": false,
+    "spans": []
+  }
+}

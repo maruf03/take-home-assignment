@@ -1,0 +1,44 @@
+{
+  "fields": {
+    "invoice_number": {
+      "found": true,
+      "value": "INV-2025-0847",
+      "quote": "   Invoice Number:   INV-2025-0847   ",
+      "line": 5,
+      "not_found_reason": ""
+    },
+    "issue_date": {
+      "found": true,
+      "value": "2025-09-14",
+      "quote": "  Issue Date:   2025-09-14  ",
+      "line": 6,
+      "not_found_reason": ""
+    },
+    "due_date": {
+      "found": true,
+      "value": "2025-11-13",
+      "quote": "  Due Date:  2025-11-13 ",
+      "line": 7,
+      "not_found_reason": ""
+    },
+    "vendor_name": {
+      "found": true,
+      "value": "MERIDIAN OFFICE SUPPLIES LLC",
+      "quote": "  MERIDIAN OFFICE SUPPLIES LLC  ",
+      "line": 1,
+      "not_found_reason": ""
+    },
+    "total_amount": {
+      "found": true,
+      "amount": "6126.45",
+      "currency": "$",
+      "quote": "  Total Due:   $6,126.45  ",
+      "line": 22,
+      "not_found_reason": ""
+    }
+  },
+  "document_flags": {
+    "suspicious_instructions": false,
+    "spans": []
+  }
+}

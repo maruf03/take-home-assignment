@@ -1,0 +1,52 @@
+{
+  "fields": {
+    "report_quarter": {
+      "found": true,
+      "value": "Q3 2025",
+      "quote": "Reporting Period: Q3 2025",
+      "line": 3,
+      "not_found_reason": ""
+    },
+    "market_area": {
+      "found": true,
+      "value": "Eastport-Harborview Submarket",
+      "quote": "Market Area: Eastport-Harborview Submarket",
+      "line": 4,
+      "not_found_reason": ""
+    },
+    "vacancy_rate": {
+      "found": true,
+      "value": "4.2%",
+      "quote": "third quarter. The overall vacancy rate declined to 4.2%, down from",
+      "line": 7,
+      "not_found_reason": ""
+    },
+    "average_rent_1br": {
+      "found": true,
+      "amount": "1985",
+      "currency": "USD",
+      "quote": "Average asking rent for a one-bedroom unit reached $1,985 per month,",
+      "line": 10,
+      "not_found_reason": ""
+    },
+    "year_over_year_rent_growth": {
+      "found": true,
+      "value": "3.8%",
+      "quote": "a year-over-year increase of 3.8%. Two-bedroom units averaged $2,540",
+      "line": 11,
+      "not_found_reason": ""
+    },
+    "median_household_income": {
+      "found": false,
+      "amount": "",
+      "currency": "",
+      "quote": "",
+      "line": -1,
+      "not_found_reason": "The report does not mention median household income."
+    }
+  },
+  "document_flags": {
+    "suspicious_instructions": false,
+    "spans": []
+  }
+}
