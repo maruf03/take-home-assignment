@@ -27,6 +27,7 @@
     "db:check": "pnpm --filter @app/db db:check",
     "db:reset": "docker compose -f compose.yaml -f compose.dev.yaml down -v && pnpm infra && pnpm db:migrate && pnpm db:seed",
     "golden:update": "pnpm --filter @app/pdf build && node scripts/golden-update.ts",
+    "cassettes:record": "pnpm --filter @app/contracts --filter @app/core --filter @app/llm build && node scripts/record-cassettes.ts",
     "prepare": "lefthook install || true"
   },
   "devDependencies": {

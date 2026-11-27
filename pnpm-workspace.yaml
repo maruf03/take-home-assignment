@@ -5,6 +5,7 @@ packages:
 allowBuilds:
   esbuild: true
   lefthook: true
+  protobufjs: false
 
 minimumReleaseAgeExclude:
   - eslint-config-prettier@10.1.9
