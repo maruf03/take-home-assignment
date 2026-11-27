@@ -1,0 +1,22 @@
+{
+  "name": "@app/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests",
+    "test:int": "vitest run --passWithNoTests test/int",
+    "test:chaos": "vitest run --passWithNoTests test/chaos",
+    "dev": "echo 'Vite React dev server is added in Core Task 11a'"
+  },
+  "dependencies": {
+    "@app/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.2"
+  }
+}

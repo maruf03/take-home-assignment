@@ -1,0 +1,37 @@
+{
+  "name": "@app/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle",
+    "assets"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests",
+    "test:int": "vitest run --passWithNoTests test/int",
+    "test:chaos": "vitest run --passWithNoTests test/chaos",
+    "db:generate": "echo 'Drizzle schema is added in Core Task 3a' && exit 1",
+    "db:migrate": "echo 'Migrate CLI is added in Core Task 3b' && exit 1",
+    "db:seed": "echo 'Seed CLI is added in Core Task 3b' && exit 1",
+    "db:check": "echo 'Schema drift check is added in Core Task 3a'"
+  },
+  "dependencies": {
+    "@app/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.4",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.2"
+  }
+}

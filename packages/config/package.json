@@ -1,0 +1,44 @@
+{
+  "name": "@app/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server-config": {
+      "types": "./dist/server-config.d.ts",
+      "import": "./dist/server-config.js"
+    },
+    "./eslint": "./eslint.config.mjs",
+    "./tsconfig/base.json": "../../tsconfig.base.json",
+    "./tsconfig/node.json": "./tsconfig.node.json",
+    "./tsconfig/nest.json": "./tsconfig.nest.json",
+    "./tsconfig/web.json": "./tsconfig.web.json"
+  },
+  "files": [
+    "dist",
+    "eslint.config.mjs",
+    "tsconfig.*.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:int": "vitest run --passWithNoTests test/int",
+    "test:chaos": "vitest run --passWithNoTests test/chaos"
+  },
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint-config-prettier": "^10.1.9",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import-x": "^4.18.1",
+    "typescript-eslint": "^8.74.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.4",
+    "eslint": "^10.15.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.2"
+  }
+}

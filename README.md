@@ -50,7 +50,12 @@ the [design spec](docs/superpowers/specs/2026-11-27-document-review-design.md). 
 
 The section titles below are fixed. Their bodies are being filled in as the Core tier lands.
 
-- **How the monorepo is laid out and why**: see spec §10. A short version comes with Core Task 1.
+- **How the monorepo is laid out and why**:
+  - `apps/api` (NestJS HTTP API, ESM/SWC, never receives LLM keys), `apps/worker` (NestJS BullMQ processor, sweep, parse pool, receives LLM keys only here), and `apps/web` (Vite + React SPA behind unprivileged nginx).
+  - `packages/contracts` (browser-safe zod DTOs, typed-value helpers, problem codes, and UI copy shared by web and server) and `packages/core` (100% pure extraction logic: text cleanup/indexing, verbatim evidence validation, carry-over rule A′, prompt/schema builders; imports only `@app/contracts`).
+  - `packages/{db,storage,pdf,llm}` (plain ESM infrastructure packages that never import Nest: Drizzle schema/migrations/grants/repos, S3 `BlobStore`, child-process PDF parser pool, and `LlmProvider` adapters).
+  - `packages/config` (shared tsconfig presets, ESLint flat config enforcing §10.1 import boundaries and `import-x/no-cycle`, and Node-only `defineServerConfig()` with the production dev-default secret denylist) and `packages/testkit` (dev/test-only builders, forbidden in `apps/*/src/**`).
+  - Managed with pnpm 12 (`allowBuilds`, strict engines on Node 24) and Turborepo (`envMode: strict`) so boundaries are enforced by both dependency graph and lint rules, while Docker images prune cleanly per app. See spec §10 and [ADR-0009](docs/adr/0009-esm-everywhere-nest-swc-bundler.md).
 - **Schema and why**: versions, values and reviews, carried chains, invariants. See spec §4; the summary comes with Core Task 3.
 - **How extraction is coordinated**: the Postgres/Redis/S3 line, plus what happens when each one fails. See [architecture](docs/explanation/architecture.md) and the [runbooks](docs/runbooks/).
 - **Open decisions and what I chose**: see the [ADRs](docs/adr/) and spec §1.

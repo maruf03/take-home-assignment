@@ -1,0 +1,26 @@
+# Local development overlay: exposes Postgres, Redis, and SeaweedFS on 127.0.0.1
+# so host-run apps (`pnpm dev`) and integration tests (`pnpm test:int`) can connect.
+# Joins the non-internal `edge` bridge in dev only because Docker cannot publish
+# host ports from containers attached solely to `internal: true` networks.
+
+services:
+  postgres:
+    ports:
+      - '127.0.0.1:5432:5432'
+    networks:
+      - backend
+      - edge
+
+  redis:
+    ports:
+      - '127.0.0.1:6379:6379'
+    networks:
+      - backend
+      - edge
+
+  s3:
+    ports:
+      - '127.0.0.1:8333:8333'
+    networks:
+      - backend
+      - edge

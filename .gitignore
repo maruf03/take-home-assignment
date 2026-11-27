@@ -53,3 +53,6 @@ Thumbs.db
 
 # superpowers execution workspaces (ledgers, briefs, review packages)
 .superpowers/
+
+# local git worktrees
+.worktrees/
