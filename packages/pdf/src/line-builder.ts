@@ -78,6 +78,10 @@ export function cleanPdfText(raw: string): string {
     ) {
       continue;
     } else if (
+      code === 0x0009 ||
+      code === 0x000a ||
+      code === 0x000c ||
+      code === 0x000d ||
       code === 0x00a0 ||
       (code >= 0x2000 && code <= 0x200a) ||
       code === 0x202f ||
@@ -122,7 +126,7 @@ function median(values: readonly number[]): number {
 
 function assembleRow(items: readonly PositionedItem[], medianFontHeight: number): BuiltLine | null {
   const sorted = [...items].sort((a, b) => a.x - b.x);
-  const columnGapThreshold = Math.max(24, 3 * medianFontHeight);
+  const columnGapThreshold = Math.max(96, 10 * medianFontHeight);
 
   let rawLine = '';
   const rawHidden: HiddenRange[] = [];
@@ -169,12 +173,14 @@ function assembleRow(items: readonly PositionedItem[], medianFontHeight: number)
       }
     }
 
-    prevRightX = item.x + Math.max(0, item.width);
-    if (item.width > 0 && item.text.length > 0) {
-      prevAvgCharWidth = item.width / item.text.length;
-    }
+    const rightEdge = item.x + Math.max(0, item.width);
+    prevRightX = prevRightX === null ? rightEdge : Math.max(prevRightX, rightEdge);
     if (!isSpaceOnly) {
-      prevNonSpaceRightX = prevRightX;
+      if (item.width > 0 && item.text.length > 0) {
+        prevAvgCharWidth = item.width / item.text.length;
+      }
+      prevNonSpaceRightX =
+        prevNonSpaceRightX === null ? rightEdge : Math.max(prevNonSpaceRightX, rightEdge);
     }
   }
 

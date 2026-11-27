@@ -100,7 +100,8 @@ export function mergeHiddenRanges(ranges: readonly HiddenRange[]): HiddenRange[]
     return [];
   }
   const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const merged: HiddenRange[] = [sorted[0]!];
+  const first = sorted[0]!;
+  const merged: HiddenRange[] = [[first[0], first[1], first[2]]];
   for (let i = 1; i < sorted.length; i++) {
     const [start, end, reason] = sorted[i]!;
     const last = merged[merged.length - 1]!;
@@ -120,7 +121,8 @@ export function mergeLowVisibilityRanges(
     return [];
   }
   const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const merged: LowVisibilityRange[] = [sorted[0]!];
+  const first = sorted[0]!;
+  const merged: LowVisibilityRange[] = [[first[0], first[1]]];
   for (let i = 1; i < sorted.length; i++) {
     const [start, end] = sorted[i]!;
     const last = merged[merged.length - 1]!;

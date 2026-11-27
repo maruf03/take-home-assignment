@@ -99,10 +99,16 @@ export class RssWatchdog {
       }
 
       for (const pid of activePids) {
+        if (!this.timer) {
+          return;
+        }
         if (this.killedPids.has(pid)) {
           continue;
         }
         const rss = await readProcessRssBytes(pid);
+        if (!this.timer) {
+          return;
+        }
         if (rss !== null && rss > this.maxRssBytes) {
           this.killedPids.add(pid);
           this.onBeforeKill(pid, rss);

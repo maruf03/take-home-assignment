@@ -2,7 +2,12 @@ import { existsSync } from 'node:fs';
 import { Tinypool } from 'tinypool';
 import { classifyChildError, PdfParseError } from './errors.js';
 import { resolvePdfParseLimits, type PdfParseLimits, type PdfParseResult } from './line-builder.js';
-import { DEFAULT_MAX_RSS_BYTES, DEFAULT_WATCHDOG_POLL_MS, RssWatchdog } from './watchdog.js';
+import {
+  DEFAULT_MAX_RSS_BYTES,
+  DEFAULT_WATCHDOG_POLL_MS,
+  RssWatchdog,
+  type WatchdogWorkerRef,
+} from './watchdog.js';
 
 export interface PdfParser {
   parse(
@@ -40,26 +45,44 @@ function resolveChildWorkerUrl(): string {
   return siblingJs.href;
 }
 
+function isUnexpectedWorkerExitError(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false;
+  }
+  return /worker exited unexpectedly|terminated/i.test(err.message);
+}
+
+interface WorkerSlot {
+  readonly pool: Tinypool;
+  busy: boolean;
+  watchdogKilled: boolean;
+  parsesSinceRecycle: number;
+}
+
+interface SlotWaiter {
+  resolve: (slot: WorkerSlot) => void;
+  reject: (err: unknown) => void;
+  cleanup: () => void;
+}
+
 /**
- * Isolated child-process PDF parsing pool backed by Tinypool + RSS watchdog (spec §5.1).
- * - `runtime: 'child_process'` with `serialization: 'advanced'`, `env: {}`, `--max-old-space-size=512`
- * - Per-task timeout via AbortController (30s default)
- * - RSS watchdog polling `/proc/<pid>/status` VmRSS (250ms default, 768 MB cap)
- * - Worker recycling every 50 parses
+ * Isolated child-process PDF parsing pool backed by per-slot Tinypool workers + RSS watchdog (spec §5.1).
+ * - Each slot runs 1 dedicated `child_process` worker (`serialization: 'advanced'`, `env: {}`,
+ *   `--max-old-space-size=512`), eliminating cross-task watchdog kill misattribution and recycling starvation.
+ * - Per-task timeout via AbortController (30s default), composable with caller AbortSignal.
+ * - RSS watchdog polls `/proc/<pid>/status` VmRSS (250ms default, 768 MB cap) and tags the exact killed slot.
+ * - Each slot recycles its child process every 50 parses cleanly between tasks.
  */
 export class PdfParserPool implements PdfParser {
-  private readonly pool: Tinypool;
+  private readonly slots: WorkerSlot[];
+  private readonly waiters: SlotWaiter[] = [];
   private readonly watchdog: RssWatchdog;
   private readonly recycleAfterParses: number;
-  private completedSinceRecycle = 0;
-  private activeTasks = 0;
-  private recycling: Promise<void> | null = null;
   private closed = false;
-  private watchdogKillCount = 0;
+  private closingPromise: Promise<void> | null = null;
 
   constructor(options: PdfParserPoolOptions = {}) {
-    const maxThreads = Math.max(1, Math.trunc(options.maxThreads ?? DEFAULT_POOL_SIZE));
-    const minThreads = Math.min(maxThreads, Math.max(1, Math.trunc(options.minThreads ?? 1)));
+    const slotCount = Math.max(1, Math.trunc(options.maxThreads ?? DEFAULT_POOL_SIZE));
     const maxOldSpaceSizeMb = Math.max(
       128,
       Math.trunc(options.maxOldSpaceSizeMb ?? DEFAULT_MAX_OLD_SPACE_MB),
@@ -68,28 +91,103 @@ export class PdfParserPool implements PdfParser {
       1,
       Math.trunc(options.recycleAfterParses ?? DEFAULT_RECYCLE_AFTER_PARSES),
     );
+    const filename = options.childFilename ?? resolveChildWorkerUrl();
 
-    this.pool = new Tinypool({
-      filename: options.childFilename ?? resolveChildWorkerUrl(),
-      runtime: 'child_process',
-      minThreads,
-      maxThreads,
-      isolateWorkers: false,
-      execArgv: [`--max-old-space-size=${maxOldSpaceSizeMb}`],
-      env: {},
-      serialization: 'advanced',
-    });
+    this.slots = Array.from({ length: slotCount }, () => ({
+      pool: new Tinypool({
+        filename,
+        runtime: 'child_process',
+        minThreads: 1,
+        maxThreads: 1,
+        isolateWorkers: false,
+        execArgv: [`--max-old-space-size=${maxOldSpaceSizeMb}`],
+        env: {},
+        serialization: 'advanced',
+      }),
+      busy: false,
+      watchdogKilled: false,
+      parsesSinceRecycle: 0,
+    }));
 
     this.watchdog = new RssWatchdog({
       pollIntervalMs: options.watchdogPollMs ?? DEFAULT_WATCHDOG_POLL_MS,
       maxRssBytes: options.maxRssBytes ?? DEFAULT_MAX_RSS_BYTES,
-      getWorkers: () => this.pool.threads,
+      getWorkers: (): readonly WatchdogWorkerRef[] =>
+        this.slots.flatMap((slot) => slot.pool.threads),
       onBeforeKill: (pid, rssBytes) => {
-        this.watchdogKillCount += 1;
+        for (const slot of this.slots) {
+          if (slot.pool.threads.some((t) => t.threadId === pid)) {
+            slot.watchdogKilled = true;
+            break;
+          }
+        }
         options.onWatchdogKill?.(pid, rssBytes);
       },
     });
     this.watchdog.start();
+  }
+
+  /**
+   * Returns active child-process PIDs currently managed by the pool (useful for observability & tests).
+   */
+  getWorkerPids(): number[] {
+    return this.slots
+      .flatMap((slot) => slot.pool.threads)
+      .map((t) => t.threadId)
+      .filter((pid) => pid > 0);
+  }
+
+  private acquireSlot(signal: AbortSignal): Promise<WorkerSlot> {
+    if (this.closed) {
+      return Promise.reject(new PdfParseError('PARSE_CRASHED', 'PdfParserPool has been closed'));
+    }
+    if (signal.aborted) {
+      return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    }
+
+    const idle = this.slots.find((s) => !s.busy);
+    if (idle) {
+      idle.busy = true;
+      return Promise.resolve(idle);
+    }
+
+    return new Promise<WorkerSlot>((resolve, reject) => {
+      const onAbort = (): void => {
+        const idx = this.waiters.indexOf(waiter);
+        if (idx !== -1) {
+          this.waiters.splice(idx, 1);
+        }
+        reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      };
+      const waiter: SlotWaiter = {
+        resolve: (slot) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(slot);
+        },
+        reject: (err) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(err);
+        },
+        cleanup: () => {
+          signal.removeEventListener('abort', onAbort);
+        },
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.waiters.push(waiter);
+    });
+  }
+
+  private releaseSlot(slot: WorkerSlot): void {
+    if (this.closed) {
+      slot.busy = false;
+      return;
+    }
+    const next = this.waiters.shift();
+    if (next) {
+      next.resolve(slot);
+      return;
+    }
+    slot.busy = false;
   }
 
   async parse(
@@ -102,10 +200,6 @@ export class PdfParserPool implements PdfParser {
     }
     if (signal?.aborted) {
       throw signal.reason ?? new DOMException('Aborted', 'AbortError');
-    }
-
-    if (this.recycling) {
-      await this.recycling;
     }
 
     const resolvedLimits = resolvePdfParseLimits(limits);
@@ -125,16 +219,54 @@ export class PdfParserPool implements PdfParser {
       ? AbortSignal.any([timeoutController.signal, signal])
       : timeoutController.signal;
 
-    const killsBefore = this.watchdogKillCount;
-    this.activeTasks += 1;
+    let slot: WorkerSlot;
+    try {
+      slot = await this.acquireSlot(combinedSignal);
+    } catch (err) {
+      clearTimeout(timer);
+      if (timeoutController.signal.aborted) {
+        throw new PdfParseError(
+          'PARSE_TIMEOUT',
+          `PDF parsing exceeded timeout of ${resolvedLimits.timeoutMs}ms`,
+          { timeoutMs: resolvedLimits.timeoutMs },
+        );
+      }
+      if (signal?.aborted) {
+        throw signal.reason ?? err;
+      }
+      throw classifyChildError(err);
+    }
+
+    // Re-check lifecycle & cancellation right after acquiring a slot.
+    if (this.closed) {
+      clearTimeout(timer);
+      this.releaseSlot(slot);
+      throw new PdfParseError('PARSE_CRASHED', 'PdfParserPool has been closed');
+    }
+    if (timeoutController.signal.aborted) {
+      clearTimeout(timer);
+      this.releaseSlot(slot);
+      throw new PdfParseError(
+        'PARSE_TIMEOUT',
+        `PDF parsing exceeded timeout of ${resolvedLimits.timeoutMs}ms`,
+        { timeoutMs: resolvedLimits.timeoutMs },
+      );
+    }
+    if (signal?.aborted) {
+      clearTimeout(timer);
+      this.releaseSlot(slot);
+      throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+    }
+
+    slot.watchdogKilled = false;
 
     try {
-      const result = (await this.pool.run(
+      const result = (await slot.pool.run(
         { bytes, limits: resolvedLimits },
         { signal: combinedSignal },
       )) as PdfParseResult;
 
-      this.completedSinceRecycle += 1;
+      slot.parsesSinceRecycle += 1;
       return result;
     } catch (err) {
       if (timeoutController.signal.aborted) {
@@ -147,39 +279,38 @@ export class PdfParserPool implements PdfParser {
       if (signal?.aborted) {
         throw signal.reason ?? err;
       }
-      if (this.watchdogKillCount > killsBefore) {
+      if (slot.watchdogKilled && isUnexpectedWorkerExitError(err)) {
         throw classifyChildError(err, 'PARSE_LIMIT_EXCEEDED');
       }
       throw classifyChildError(err);
     } finally {
       clearTimeout(timer);
-      this.activeTasks -= 1;
-      if (
-        !this.closed &&
-        this.activeTasks === 0 &&
-        this.completedSinceRecycle >= this.recycleAfterParses &&
-        !this.recycling
-      ) {
-        this.completedSinceRecycle = 0;
-        this.recycling = this.pool
-          .recycleWorkers()
-          .catch(() => undefined)
-          .finally(() => {
-            this.recycling = null;
-          });
+      slot.watchdogKilled = false;
+      if (!this.closed && slot.parsesSinceRecycle >= this.recycleAfterParses) {
+        slot.parsesSinceRecycle = 0;
+        await slot.pool.recycleWorkers().catch(() => undefined);
       }
+      this.releaseSlot(slot);
     }
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
-      return;
+    if (this.closingPromise) {
+      return this.closingPromise;
     }
     this.closed = true;
     this.watchdog.stop();
-    if (this.recycling) {
-      await this.recycling;
+
+    const closeError = new PdfParseError('PARSE_CRASHED', 'PdfParserPool has been closed');
+    while (this.waiters.length > 0) {
+      const waiter = this.waiters.shift()!;
+      waiter.cleanup();
+      waiter.reject(closeError);
     }
-    await this.pool.destroy();
+
+    this.closingPromise = Promise.all(this.slots.map((slot) => slot.pool.destroy())).then(
+      () => undefined,
+    );
+    return this.closingPromise;
   }
 }

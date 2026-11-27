@@ -4,9 +4,7 @@
   "pageOffsets": [
     0
   ],
-  "warnings": [
-    "MULTI_COLUMN"
-  ],
+  "warnings": [],
   "textRanges": {
     "hidden": [],
     "lowVisibility": []

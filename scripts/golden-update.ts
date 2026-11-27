@@ -2,7 +2,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
-import { buildDocumentFromPages, extractRawPagesFromPdf } from '../packages/pdf/dist/index.js';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const FIXTURES_DIR = path.join(REPO_ROOT, 'fixtures', 'documents');
@@ -18,6 +17,11 @@ const FIXTURE_STEMS = [
 function isCiEnvironment(env: NodeJS.ProcessEnv): boolean {
   const ci = env['CI']?.trim().toLowerCase();
   return ci !== undefined && ci !== '' && ci !== '0' && ci !== 'false';
+}
+
+function createDeterministicPdf(): Promise<PDFDocument> {
+  // Disable automatic CreationDate/ModDate timestamps so crafted PDFs are byte-identical across runs.
+  return PDFDocument.create({ updateMetadata: false });
 }
 
 function buildMinimalRawPdf(objects: string[], trailerExtra = ''): Buffer {
@@ -54,12 +58,13 @@ function buildEncryptedPdf(): Buffer {
 }
 
 function buildFlateBombPdf(): Buffer {
-  // Craft a real FlateDecode content stream that compresses tiny (~250 KB) on disk
-  // and inflates to ~260 MB of PDF text commands inside the child process, triggering RSS watchdog.
+  // Double-nested FlateDecode content stream: only a few KB on disk, inflates to ~257 MB
+  // inside the child process, triggering the Linux /proc VmRSS watchdog -> PARSE_LIMIT_EXCEEDED.
   const line =
     'BT /F1 12 Tf 10 700 Td (AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA) Tj ET\n';
   const payload = Buffer.from(line.repeat(2_800_000), 'latin1'); // ~257 MB uncompressed
-  const compressed = deflateSync(payload, { level: 9 });
+  const innerCompressed = deflateSync(payload, { level: 9 });
+  const outerCompressed = deflateSync(innerCompressed, { level: 9 });
 
   const header = Buffer.from('%PDF-1.4\n', 'latin1');
   const obj1 = Buffer.from('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n', 'latin1');
@@ -72,7 +77,7 @@ function buildFlateBombPdf(): Buffer {
     'latin1',
   );
   const obj4Prefix = Buffer.from(
-    `4 0 obj\n<< /Length ${compressed.byteLength} /Filter /FlateDecode >>\nstream\n`,
+    `4 0 obj\n<< /Length ${outerCompressed.byteLength} /Filter [/FlateDecode /FlateDecode] >>\nstream\n`,
     'latin1',
   );
   const obj4Suffix = Buffer.from('\nendstream\nendobj\n', 'latin1');
@@ -81,7 +86,7 @@ function buildFlateBombPdf(): Buffer {
     'latin1',
   );
 
-  const parts = [header, obj1, obj2, obj3, obj4Prefix, compressed, obj4Suffix, obj5];
+  const parts = [header, obj1, obj2, obj3, obj4Prefix, outerCompressed, obj4Suffix, obj5];
   const offsets: number[] = [0];
   let cursor = header.byteLength;
   offsets.push(cursor);
@@ -91,7 +96,7 @@ function buildFlateBombPdf(): Buffer {
   offsets.push(cursor);
   cursor += obj3.byteLength;
   offsets.push(cursor);
-  cursor += obj4Prefix.byteLength + compressed.byteLength + obj4Suffix.byteLength;
+  cursor += obj4Prefix.byteLength + outerCompressed.byteLength + obj4Suffix.byteLength;
   offsets.push(cursor);
   cursor += obj5.byteLength;
 
@@ -109,7 +114,7 @@ async function generateCraftedPdfs(craftedDir: string): Promise<void> {
 
   // 1. off-page.pdf
   {
-    const doc = await PDFDocument.create();
+    const doc = await createDeterministicPdf();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([612, 792]);
     page.drawText('Visible Invoice Summary Header', { x: 50, y: 740, size: 12, font });
@@ -127,7 +132,7 @@ async function generateCraftedPdfs(craftedDir: string): Promise<void> {
 
   // 2. low-visibility.pdf
   {
-    const doc = await PDFDocument.create();
+    const doc = await createDeterministicPdf();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([612, 792]);
     page.drawText('Visible Lease Agreement Excerpt', { x: 50, y: 740, size: 12, font });
@@ -147,7 +152,7 @@ async function generateCraftedPdfs(craftedDir: string): Promise<void> {
 
   // 5. too-many-pages.pdf (250 pages)
   {
-    const doc = await PDFDocument.create();
+    const doc = await createDeterministicPdf();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     for (let i = 1; i <= 250; i++) {
       const page = doc.addPage([612, 792]);
@@ -163,7 +168,7 @@ async function generateCraftedPdfs(craftedDir: string): Promise<void> {
 
   // 6. no-text.pdf (blank page)
   {
-    const doc = await PDFDocument.create();
+    const doc = await createDeterministicPdf();
     doc.addPage([612, 792]);
     await writeFile(path.join(craftedDir, 'no-text.pdf'), await doc.save());
   }
@@ -173,7 +178,7 @@ async function generateCraftedPdfs(craftedDir: string): Promise<void> {
 
   // 8. rotated-and-columns.pdf
   {
-    const doc = await PDFDocument.create();
+    const doc = await createDeterministicPdf();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([612, 792]);
     for (let i = 0; i < 5; i++) {
@@ -193,6 +198,9 @@ async function generateCraftedPdfs(craftedDir: string): Promise<void> {
 }
 
 async function generateFixtureGoldens(): Promise<void> {
+  const { buildDocumentFromPages, extractRawPagesFromPdf } =
+    await import('../packages/pdf/dist/index.js');
+
   const itemsDir = path.join(GOLDEN_DIR, 'items');
   const textDir = path.join(GOLDEN_DIR, 'text');
   const rangesDir = path.join(GOLDEN_DIR, 'ranges');

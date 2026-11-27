@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { PdfParseError } from '../src/errors.js';
 import { buildDocumentFromPages, cleanPdfText, PARSER_ID } from '../src/line-builder.js';
-import type { RawPdfPage, RawPdfTextItem } from '../src/ranges.js';
+import {
+  mergeHiddenRanges,
+  mergeLowVisibilityRanges,
+  type HiddenRange,
+  type LowVisibilityRange,
+  type RawPdfPage,
+  type RawPdfTextItem,
+} from '../src/ranges.js';
 
 function item(
   str: string,
@@ -127,5 +134,46 @@ describe('buildDocumentFromPages (§5.1 line builder & ranges)', () => {
     expect(() => buildDocumentFromPages([smallPage], { maxTextChars: 10 })).toThrowError(
       expect.objectContaining({ code: 'PARSE_LIMIT_EXCEEDED' }),
     );
+  });
+
+  it('normalizes embedded control whitespace without creating fake page breaks, keeps prevAvgCharWidth/prevRightX clean, and does not mutate input ranges', () => {
+    const pages: RawPdfPage[] = [
+      {
+        pageNumber: 1,
+        view: [0, 0, 612, 792],
+        items: [
+          item('Hello\t\f\nWorld', 40, 750, 80, 12),
+          item(' ', 120, 750, 200, 12), // wide explicit space must not inflate prevAvgCharWidth
+          item('ZeroWidth', 320, 750, 0, 12),
+          item('NextWord', 330, 750, 50, 12), // gap = 10 > 0.25 * (80/11) -> gets space!
+          // Overlapping item inside earlier wide item must not regress prevRightX and trigger false gap
+          item('WideBackgroundTextSpan', 40, 720, 200, 12),
+          item('Sub', 60, 720, 20, 12),
+          item('Tail', 241, 720, 24, 12),
+        ],
+      },
+    ];
+
+    const res = buildDocumentFromPages(pages);
+    expect(res.text).not.toContain('\f');
+    expect(res.text).toContain('ZeroWidth NextWord');
+    expect(res.warnings).not.toContain('MULTI_COLUMN');
+
+    // mergeHiddenRanges and mergeLowVisibilityRanges must not mutate caller tuples
+    const hiddenInput: HiddenRange[] = [
+      [0, 5, 'OFF_PAGE'],
+      [3, 10, 'OFF_PAGE'],
+    ];
+    const mergedHidden = mergeHiddenRanges(hiddenInput);
+    expect(mergedHidden).toEqual([[0, 10, 'OFF_PAGE']]);
+    expect(hiddenInput[0]).toEqual([0, 5, 'OFF_PAGE']);
+
+    const lvInput: LowVisibilityRange[] = [
+      [0, 4],
+      [4, 9],
+    ];
+    const mergedLv = mergeLowVisibilityRanges(lvInput);
+    expect(mergedLv).toEqual([[0, 9]]);
+    expect(lvInput[0]).toEqual([0, 4]);
   });
 });
