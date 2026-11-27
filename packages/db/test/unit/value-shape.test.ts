@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as dbRoot from '../../src/index.js';
 import {
   inList,
   sqlQuote,
@@ -19,5 +20,11 @@ describe('SQL value-shape helpers', () => {
     expect(sqlTextArray(['A', 'B'])).toBeDefined();
     expect(sqlRegex('col', '^[a-z]+$')).toBeDefined();
     expect(valueShapeSql('field_type', 'value')).toBeDefined();
+  });
+
+  it('does not expose raw documents table or internal SQL DDL helpers on @app/db root', () => {
+    expect('documents' in dbRoot).toBe(false);
+    expect('sqlQuote' in dbRoot).toBe(false);
+    expect('valueShapeSql' in dbRoot).toBe(false);
   });
 });

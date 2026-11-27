@@ -37,6 +37,8 @@ const ALL_TABLES_TRUNCATE_SQL = `TRUNCATE TABLE
   document_types
 RESTART IDENTITY CASCADE`;
 
+let templateDbSeq = 0;
+
 function buildDbUrl(baseUrl: string, dbName: string, user?: string, password?: string): string {
   const url = new URL(baseUrl);
   url.pathname = `/${dbName}`;
@@ -51,6 +53,15 @@ function sanitizeDbIdent(raw: string): string {
     throw new Error(`Invalid database identifier: "${raw}"`);
   }
   return cleaned;
+}
+
+async function dropTestDatabase(adminUrl: string, databaseName: string): Promise<void> {
+  const cleanupPool = new Pool({ connectionString: adminUrl, max: 1 });
+  try {
+    await cleanupPool.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
+  } finally {
+    await cleanupPool.end();
+  }
 }
 
 export async function withTemplateDb(
@@ -69,12 +80,15 @@ export async function withTemplateDb(
     buildDbUrl(baseMigratorUrl, 'postgres', adminUser, adminPassword);
 
   const workerId = process.env['VITEST_POOL_ID'] ?? process.env['VITEST_WORKER_ID'] ?? '1';
-  const databaseName = sanitizeDbIdent(`lomi_test_w${workerId}_${process.pid}`);
+  const databaseName = sanitizeDbIdent(`lomi_test_w${workerId}_${process.pid}_${++templateDbSeq}`);
 
+  let dbCreated = false;
   const adminPool = new Pool({ connectionString: adminUrl, max: 2 });
   try {
     await adminPool.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
     await adminPool.query(`CREATE DATABASE "${databaseName}" OWNER migrator`);
+    dbCreated = true;
+
     // Restrict schema public on the freshly created test database just like 01-roles.sh.
     const testAdminPool = new Pool({
       connectionString: buildDbUrl(adminUrl, databaseName),
@@ -89,6 +103,13 @@ export async function withTemplateDb(
     } finally {
       await testAdminPool.end();
     }
+  } catch (err) {
+    if (dbCreated) {
+      await adminPool
+        .query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`)
+        .catch(() => undefined);
+    }
+    throw err;
   } finally {
     await adminPool.end();
   }
@@ -116,14 +137,8 @@ export async function withTemplateDb(
       await migratorPool.query(grantsSql);
     }
   } catch (err) {
-    await migratorPool.end();
-    await appPool.end();
-    const cleanupPool = new Pool({ connectionString: adminUrl, max: 1 });
-    try {
-      await cleanupPool.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
-    } finally {
-      await cleanupPool.end();
-    }
+    await Promise.allSettled([appPool.end(), migratorPool.end()]);
+    await dropTestDatabase(adminUrl, databaseName);
     throw err;
   }
 
@@ -137,13 +152,10 @@ export async function withTemplateDb(
       await migratorPool.query(ALL_TABLES_TRUNCATE_SQL);
     },
     async close() {
-      await appPool.end();
-      await migratorPool.end();
-      const cleanupPool = new Pool({ connectionString: adminUrl, max: 1 });
       try {
-        await cleanupPool.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
+        await Promise.allSettled([appPool.end(), migratorPool.end()]);
       } finally {
-        await cleanupPool.end();
+        await dropTestDatabase(adminUrl, databaseName);
       }
     },
   };

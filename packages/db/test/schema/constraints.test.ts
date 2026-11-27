@@ -188,4 +188,18 @@ describe('schema CHECK and UNIQUE constraints (§4)', () => {
       ),
     ).rejects.toMatchObject({ code: '23514' });
   });
+
+  it('withTemplateDb isolates concurrent handles within the same process', async () => {
+    const h1 = await withTemplateDb({ applyGrants: true });
+    const h2 = await withTemplateDb({ applyGrants: true });
+    try {
+      expect(h1.databaseName).not.toBe(h2.databaseName);
+      // Both databases remain independently queryable
+      await expect(h1.appPool.query('SELECT 1 AS ok')).resolves.toBeDefined();
+      await expect(h2.appPool.query('SELECT 1 AS ok')).resolves.toBeDefined();
+    } finally {
+      await h1.close();
+      await h2.close();
+    }
+  });
 });

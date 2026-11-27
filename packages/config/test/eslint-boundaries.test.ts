@@ -100,12 +100,13 @@ describe('ESLint import boundaries (spec §10.1)', () => {
           `import { b } from '@app/db/testing';`,
           `import { c } from '@app/db/schema/documents';`,
           `import { d } from '../../../packages/db/src/schema/documents.js';`,
-          `export const bad = [a, b, c, d];`,
+          `import { documents } from '@app/db';`,
+          `export const bad = [a, b, c, d, documents];`,
         ].join('\n'),
         `apps/${app}/src/bad.ts`,
       );
       const restricted = messages.filter((m) => m.ruleId === 'no-restricted-imports');
-      expect(restricted, `expected test/schema ban in apps/${app}/src`).toHaveLength(4);
+      expect(restricted, `expected test/schema ban in apps/${app}/src`).toHaveLength(5);
     }
   });
 });
