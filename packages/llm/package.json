@@ -20,7 +20,13 @@
     "test:int": "vitest run --passWithNoTests test/int",
     "test:chaos": "vitest run --passWithNoTests test/chaos"
   },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.14.0",
+    "@app/contracts": "workspace:*",
+    "@google/genai": "3.6.1"
+  },
   "devDependencies": {
+    "@app/core": "workspace:*",
     "@types/node": "^24.19.4",
     "typescript": "^5.9.3",
     "vitest": "^5.1.2"
