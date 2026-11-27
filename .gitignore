@@ -1,0 +1,52 @@
+# --- secrets & local config ---------------------------------------------------
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+*.pem
+*.key
+
+# --- dependencies -------------------------------------------------------------
+node_modules/
+.pnpm-store/
+
+# --- build output -------------------------------------------------------------
+dist/
+build/
+out/
+*.tsbuildinfo
+.turbo/
+# Nest Swagger CLI plugin output (regenerated on build, ADR-0009)
+apps/*/src/metadata.ts
+
+# --- test & coverage ----------------------------------------------------------
+coverage/
+reports/
+junit*.xml
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+.stryker-tmp/
+.vitest-cache/
+
+# --- local tooling ------------------------------------------------------------
+.aws-emulator/
+.scratch/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.cache/
+.eslintcache
+
+# --- editors & OS -------------------------------------------------------------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- never commit (brief rule): coding-agent session logs ----------------------
+*.jsonl
