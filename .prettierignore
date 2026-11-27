@@ -10,6 +10,7 @@ pnpm-lock.yaml
 fixtures/
 fixtures-golden/
 docs/history/
+packages/db/drizzle/
 *.md
 BRIEF.md
 jd.md

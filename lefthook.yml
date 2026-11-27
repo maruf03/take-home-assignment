@@ -3,7 +3,7 @@ pre-commit:
   commands:
     prettier:
       glob: '*.{ts,tsx,js,jsx,mjs,cjs,json,yml,yaml,css}'
-      exclude: '^(fixtures/|fixtures-golden/|pnpm-lock\.yaml)'
+      exclude: '^(fixtures/|fixtures-golden/|packages/db/drizzle/|pnpm-lock\.yaml)'
       run: pnpm exec prettier --check --ignore-unknown {staged_files}
     eslint:
       glob: '*.{ts,tsx,js,jsx,mjs,cjs}'

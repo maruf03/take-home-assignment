@@ -7,31 +7,38 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./status": {
       "types": "./dist/status.d.ts",
-      "import": "./dist/status.js"
+      "import": "./dist/status.js",
+      "default": "./dist/status.js"
     },
     "./values": {
       "types": "./dist/values.d.ts",
-      "import": "./dist/values.js"
+      "import": "./dist/values.js",
+      "default": "./dist/values.js"
     },
     "./page": {
       "types": "./dist/page.d.ts",
-      "import": "./dist/page.js"
+      "import": "./dist/page.js",
+      "default": "./dist/page.js"
     },
     "./problems": {
       "types": "./dist/problems.d.ts",
-      "import": "./dist/problems.js"
+      "import": "./dist/problems.js",
+      "default": "./dist/problems.js"
     },
     "./ui-copy": {
       "types": "./dist/ui-copy.d.ts",
-      "import": "./dist/ui-copy.js"
+      "import": "./dist/ui-copy.js",
+      "default": "./dist/ui-copy.js"
     },
     "./dto": {
       "types": "./dist/dto/index.d.ts",
-      "import": "./dist/dto/index.js"
+      "import": "./dist/dto/index.js",
+      "default": "./dist/dto/index.js"
     }
   },
   "files": [

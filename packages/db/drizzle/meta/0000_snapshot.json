@@ -1,0 +1,1790 @@
+{
+  "id": "4fc30eb5-ffe4-44b3-aa14-0d5c565fca8f",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.document_versions": {
+      "name": "document_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_number": {
+          "name": "version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "template_id": {
+          "name": "template_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'upload'"
+        },
+        "source_version_id": {
+          "name": "source_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_sha256": {
+          "name": "file_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_size_bytes": {
+          "name": "file_size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "original_filename": {
+          "name": "original_filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parsed_text": {
+          "name": "parsed_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parsed_text_sha256": {
+          "name": "parsed_text_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parser": {
+          "name": "parser",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "page_offsets": {
+          "name": "page_offsets",
+          "type": "integer[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "text_ranges": {
+          "name": "text_ranges",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warnings": {
+          "name": "warnings",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "run_seq": {
+          "name": "run_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "active_run_id": {
+          "name": "active_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enqueued_at": {
+          "name": "enqueued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_message": {
+          "name": "last_error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "extracted_at": {
+          "name": "extracted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_request_id": {
+          "name": "created_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "document_versions_inflight_idx": {
+          "name": "document_versions_inflight_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lease_until",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "status IN ('queued', 'extracting')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "document_versions_template_id_idx": {
+          "name": "document_versions_template_id_idx",
+          "columns": [
+            {
+              "expression": "template_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "document_versions_document_id_documents_id_fk": {
+          "name": "document_versions_document_id_documents_id_fk",
+          "tableFrom": "document_versions",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "document_versions_template_id_extraction_templates_id_fk": {
+          "name": "document_versions_template_id_extraction_templates_id_fk",
+          "tableFrom": "document_versions",
+          "tableTo": "extraction_templates",
+          "columnsFrom": [
+            "template_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "document_versions_source_version_fk": {
+          "name": "document_versions_source_version_fk",
+          "tableFrom": "document_versions",
+          "tableTo": "document_versions",
+          "columnsFrom": [
+            "source_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "document_versions_active_run_fk": {
+          "name": "document_versions_active_run_fk",
+          "tableFrom": "document_versions",
+          "tableTo": "extraction_runs",
+          "columnsFrom": [
+            "active_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "document_versions_doc_id_id_uq": {
+          "name": "document_versions_doc_id_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_id",
+            "id"
+          ]
+        },
+        "document_versions_doc_id_number_uq": {
+          "name": "document_versions_doc_id_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_id",
+            "version_number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "document_versions_version_number_chk": {
+          "name": "document_versions_version_number_chk",
+          "value": "version_number >= 1"
+        },
+        "document_versions_origin_chk": {
+          "name": "document_versions_origin_chk",
+          "value": "origin IN ('upload', 'reextract')"
+        },
+        "document_versions_source_version_chk": {
+          "name": "document_versions_source_version_chk",
+          "value": "(origin = 'reextract') = (source_version_id IS NOT NULL)"
+        },
+        "document_versions_status_chk": {
+          "name": "document_versions_status_chk",
+          "value": "status IN ('queued', 'extracting', 'extracted', 'failed')"
+        },
+        "document_versions_file_sha_chk": {
+          "name": "document_versions_file_sha_chk",
+          "value": "file_sha256 ~ '^[0-9a-f]{64}$'"
+        },
+        "document_versions_file_size_chk": {
+          "name": "document_versions_file_size_chk",
+          "value": "file_size_bytes BETWEEN 1 AND 10485760"
+        },
+        "document_versions_original_filename_chk": {
+          "name": "document_versions_original_filename_chk",
+          "value": "octet_length(original_filename) BETWEEN 1 AND 255"
+        },
+        "document_versions_parsed_text_pair_chk": {
+          "name": "document_versions_parsed_text_pair_chk",
+          "value": "(parsed_text IS NULL) = (parsed_text_sha256 IS NULL)"
+        },
+        "document_versions_parsed_text_sha_chk": {
+          "name": "document_versions_parsed_text_sha_chk",
+          "value": "parsed_text_sha256 IS NULL OR parsed_text_sha256 ~ '^[0-9a-f]{64}$'"
+        },
+        "document_versions_text_ranges_chk": {
+          "name": "document_versions_text_ranges_chk",
+          "value": "text_ranges IS NULL OR jsonb_typeof(text_ranges) = 'object'"
+        },
+        "document_versions_warnings_chk": {
+          "name": "document_versions_warnings_chk",
+          "value": "warnings <@ ARRAY['SUSPICIOUS_INSTRUCTIONS', 'MULTI_COLUMN', 'ROTATED_TEXT', 'HIDDEN_TEXT_PRESENT', 'CHUNKED']::text[]"
+        },
+        "document_versions_attempts_chk": {
+          "name": "document_versions_attempts_chk",
+          "value": "attempts >= 0"
+        },
+        "document_versions_run_seq_chk": {
+          "name": "document_versions_run_seq_chk",
+          "value": "run_seq >= 0"
+        },
+        "document_versions_extracting_lease_chk": {
+          "name": "document_versions_extracting_lease_chk",
+          "value": "(status = 'extracting') = (active_run_id IS NOT NULL AND lease_until IS NOT NULL AND worker_id IS NOT NULL)"
+        },
+        "document_versions_failed_error_chk": {
+          "name": "document_versions_failed_error_chk",
+          "value": "(status = 'failed') = (last_error_code IS NOT NULL)"
+        },
+        "document_versions_last_error_code_chk": {
+          "name": "document_versions_last_error_code_chk",
+          "value": "last_error_code IS NULL OR last_error_code IN ('PARSE_ENCRYPTED', 'PARSE_MALFORMED', 'PARSE_TIMEOUT', 'PARSE_LIMIT_EXCEEDED', 'PARSE_NO_TEXT', 'PARSE_CRASHED', 'STORAGE_UNAVAILABLE', 'INTEGRITY_MISMATCH', 'LLM_NOT_CONFIGURED', 'LLM_AUTH', 'LLM_BAD_REQUEST', 'LLM_SCHEMA_INVALID', 'LLM_TRUNCATED', 'LLM_REFUSED', 'LLM_RATE_CAPPED', 'LLM_CALL_CAP', 'MAX_ATTEMPTS', 'DOCUMENT_DELETED')"
+        },
+        "document_versions_extracted_at_chk": {
+          "name": "document_versions_extracted_at_chk",
+          "value": "(status = 'extracted') = (extracted_at IS NOT NULL)"
+        },
+        "document_versions_extracted_text_chk": {
+          "name": "document_versions_extracted_text_chk",
+          "value": "status <> 'extracted' OR parsed_text IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.documents": {
+      "name": "documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "latest_version_number": {
+          "name": "latest_version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "reviewable_version_id": {
+          "name": "reviewable_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_count": {
+          "name": "pending_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_reason": {
+          "name": "deleted_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_request_id": {
+          "name": "deleted_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "documents_alive_id_idx": {
+          "name": "documents_alive_id_idx",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "documents_alive_type_id_idx": {
+          "name": "documents_alive_type_id_idx",
+          "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "documents_alive_pending_id_idx": {
+          "name": "documents_alive_pending_id_idx",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at IS NULL AND pending_count > 0",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "documents_alive_type_pending_id_idx": {
+          "name": "documents_alive_type_pending_id_idx",
+          "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at IS NULL AND pending_count > 0",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "documents_deleted_at_id_idx": {
+          "name": "documents_deleted_at_id_idx",
+          "columns": [
+            {
+              "expression": "deleted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "documents_type_document_types_key_fk": {
+          "name": "documents_type_document_types_key_fk",
+          "tableFrom": "documents",
+          "tableTo": "document_types",
+          "columnsFrom": [
+            "type"
+          ],
+          "columnsTo": [
+            "key"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "documents_reviewable_version_fk": {
+          "name": "documents_reviewable_version_fk",
+          "tableFrom": "documents",
+          "tableTo": "document_versions",
+          "columnsFrom": [
+            "id",
+            "reviewable_version_id"
+          ],
+          "columnsTo": [
+            "document_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "documents_external_id_uq": {
+          "name": "documents_external_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "documents_title_len_chk": {
+          "name": "documents_title_len_chk",
+          "value": "char_length(title) BETWEEN 1 AND 200"
+        },
+        "documents_latest_version_number_chk": {
+          "name": "documents_latest_version_number_chk",
+          "value": "latest_version_number >= 0"
+        },
+        "documents_pending_count_chk": {
+          "name": "documents_pending_count_chk",
+          "value": "pending_count >= 0"
+        },
+        "documents_deleted_reason_chk": {
+          "name": "documents_deleted_reason_chk",
+          "value": "deleted_reason IS NULL OR (deleted_at IS NOT NULL AND char_length(deleted_reason) <= 500)"
+        },
+        "documents_deleted_request_id_chk": {
+          "name": "documents_deleted_request_id_chk",
+          "value": "deleted_request_id IS NULL OR deleted_at IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.extraction_runs": {
+      "name": "extraction_runs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_number": {
+          "name": "run_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunked": {
+          "name": "chunked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "llm_call_count": {
+          "name": "llm_call_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "reused_call_count": {
+          "name": "reused_call_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "cost_usd": {
+          "name": "cost_usd",
+          "type": "numeric(12, 6)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "extraction_runs_one_running_per_version_idx": {
+          "name": "extraction_runs_one_running_per_version_idx",
+          "columns": [
+            {
+              "expression": "version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'running'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "extraction_runs_version_id_document_versions_id_fk": {
+          "name": "extraction_runs_version_id_document_versions_id_fk",
+          "tableFrom": "extraction_runs",
+          "tableTo": "document_versions",
+          "columnsFrom": [
+            "version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "extraction_runs_id_version_id_uq": {
+          "name": "extraction_runs_id_version_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "version_id"
+          ]
+        },
+        "extraction_runs_version_run_number_uq": {
+          "name": "extraction_runs_version_run_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "version_id",
+            "run_number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "extraction_runs_run_number_chk": {
+          "name": "extraction_runs_run_number_chk",
+          "value": "run_number >= 1"
+        },
+        "extraction_runs_status_chk": {
+          "name": "extraction_runs_status_chk",
+          "value": "status IN ('running', 'succeeded', 'failed', 'abandoned')"
+        },
+        "extraction_runs_running_finished_chk": {
+          "name": "extraction_runs_running_finished_chk",
+          "value": "(status = 'running') = (finished_at IS NULL)"
+        },
+        "extraction_runs_trigger_chk": {
+          "name": "extraction_runs_trigger_chk",
+          "value": "trigger IN ('upload', 'sweep', 'retry', 'redelivery', 'reextract', 'restore')"
+        },
+        "extraction_runs_llm_call_count_chk": {
+          "name": "extraction_runs_llm_call_count_chk",
+          "value": "llm_call_count >= 0"
+        },
+        "extraction_runs_reused_call_count_chk": {
+          "name": "extraction_runs_reused_call_count_chk",
+          "value": "reused_call_count >= 0"
+        },
+        "extraction_runs_cost_usd_chk": {
+          "name": "extraction_runs_cost_usd_chk",
+          "value": "cost_usd >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.llm_calls": {
+      "name": "llm_calls",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunk_index": {
+          "name": "chunk_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_sha256": {
+          "name": "request_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reused_from_call_id": {
+          "name": "reused_from_call_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "served_model": {
+          "name": "served_model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prompt_version": {
+          "name": "prompt_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request": {
+          "name": "request",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_request_id": {
+          "name": "provider_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_response": {
+          "name": "raw_response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stop_reason": {
+          "name": "stop_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "schema_valid": {
+          "name": "schema_valid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "input_tokens": {
+          "name": "input_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_tokens": {
+          "name": "output_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "usage": {
+          "name": "usage",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cost_usd": {
+          "name": "cost_usd",
+          "type": "numeric(12, 6)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "latency_ms": {
+          "name": "latency_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "llm_calls_reuse_lookup_idx": {
+          "name": "llm_calls_reuse_lookup_idx",
+          "columns": [
+            {
+              "expression": "version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_sha256",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "schema_valid = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "llm_calls_billed_count_idx": {
+          "name": "llm_calls_billed_count_idx",
+          "columns": [
+            {
+              "expression": "version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "reused_from_call_id IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "llm_calls_run_version_fk": {
+          "name": "llm_calls_run_version_fk",
+          "tableFrom": "llm_calls",
+          "tableTo": "extraction_runs",
+          "columnsFrom": [
+            "run_id",
+            "version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "version_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "llm_calls_reused_from_fk": {
+          "name": "llm_calls_reused_from_fk",
+          "tableFrom": "llm_calls",
+          "tableTo": "llm_calls",
+          "columnsFrom": [
+            "reused_from_call_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "llm_calls_run_seq_uq": {
+          "name": "llm_calls_run_seq_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "run_id",
+            "seq"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "llm_calls_seq_chk": {
+          "name": "llm_calls_seq_chk",
+          "value": "seq >= 1"
+        },
+        "llm_calls_kind_chk": {
+          "name": "llm_calls_kind_chk",
+          "value": "kind IN ('extract', 'repair', 'chunk')"
+        },
+        "llm_calls_chunk_index_chk": {
+          "name": "llm_calls_chunk_index_chk",
+          "value": "(kind = 'chunk') = (chunk_index IS NOT NULL) AND (chunk_index IS NULL OR chunk_index >= 0)"
+        },
+        "llm_calls_request_sha_chk": {
+          "name": "llm_calls_request_sha_chk",
+          "value": "request_sha256 ~ '^[0-9a-f]{64}$'"
+        },
+        "llm_calls_cost_usd_chk": {
+          "name": "llm_calls_cost_usd_chk",
+          "value": "cost_usd >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.document_types": {
+      "name": "document_types",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "document_types_key_chk": {
+          "name": "document_types_key_chk",
+          "value": "key ~ '^[a-z][a-z0-9_]{1,40}$'"
+        },
+        "document_types_display_name_chk": {
+          "name": "document_types_display_name_chk",
+          "value": "char_length(btrim(display_name)) >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.extraction_templates": {
+      "name": "extraction_templates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "document_type": {
+          "name": "document_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_sha256": {
+          "name": "content_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instructions": {
+          "name": "instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_currency": {
+          "name": "default_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'USD'"
+        },
+        "date_order": {
+          "name": "date_order",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'MDY'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "extraction_templates_document_type_document_types_key_fk": {
+          "name": "extraction_templates_document_type_document_types_key_fk",
+          "tableFrom": "extraction_templates",
+          "tableTo": "document_types",
+          "columnsFrom": [
+            "document_type"
+          ],
+          "columnsTo": [
+            "key"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "extraction_templates_doc_type_version_uq": {
+          "name": "extraction_templates_doc_type_version_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_type",
+            "version"
+          ]
+        },
+        "extraction_templates_doc_type_sha_uq": {
+          "name": "extraction_templates_doc_type_sha_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_type",
+            "content_sha256"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "extraction_templates_version_chk": {
+          "name": "extraction_templates_version_chk",
+          "value": "version >= 1"
+        },
+        "extraction_templates_sha_chk": {
+          "name": "extraction_templates_sha_chk",
+          "value": "content_sha256 ~ '^[0-9a-f]{64}$'"
+        },
+        "extraction_templates_default_currency_chk": {
+          "name": "extraction_templates_default_currency_chk",
+          "value": "default_currency ~ '^[A-Z]{3}$'"
+        },
+        "extraction_templates_date_order_chk": {
+          "name": "extraction_templates_date_order_chk",
+          "value": "date_order IN ('MDY', 'DMY', 'YMD')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.template_fields": {
+      "name": "template_fields",
+      "schema": "",
+      "columns": {
+        "template_id": {
+          "name": "template_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "field_key": {
+          "name": "field_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "field_type": {
+          "name": "field_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "template_fields_template_id_extraction_templates_id_fk": {
+          "name": "template_fields_template_id_extraction_templates_id_fk",
+          "tableFrom": "template_fields",
+          "tableTo": "extraction_templates",
+          "columnsFrom": [
+            "template_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "template_fields_pk": {
+          "name": "template_fields_pk",
+          "columns": [
+            "template_id",
+            "field_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "template_fields_template_position_uq": {
+          "name": "template_fields_template_position_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "template_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "template_fields_field_key_chk": {
+          "name": "template_fields_field_key_chk",
+          "value": "field_key ~ '^[a-z][a-z0-9_]{0,62}$'"
+        },
+        "template_fields_field_type_chk": {
+          "name": "template_fields_field_type_chk",
+          "value": "field_type IN ('string', 'date', 'money', 'number', 'percent')"
+        },
+        "template_fields_position_chk": {
+          "name": "template_fields_position_chk",
+          "value": "position BETWEEN 1 AND 100"
+        },
+        "template_fields_label_chk": {
+          "name": "template_fields_label_chk",
+          "value": "char_length(btrim(label)) >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.extracted_values": {
+      "name": "extracted_values",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "field_key": {
+          "name": "field_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "field_type": {
+          "name": "field_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "raw_value": {
+          "name": "raw_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempted_quote": {
+          "name": "attempted_quote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "canonical_evidence": {
+          "name": "canonical_evidence",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence_start": {
+          "name": "evidence_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence_end": {
+          "name": "evidence_end",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "evidence_match_count": {
+          "name": "evidence_match_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cited_line": {
+          "name": "cited_line",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_mode": {
+          "name": "match_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chunk_index": {
+          "name": "chunk_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gap_code": {
+          "name": "gap_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gap_reason": {
+          "name": "gap_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "flags": {
+          "name": "flags",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "baseline_value_id": {
+          "name": "baseline_value_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "change_kind": {
+          "name": "change_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "change_reason": {
+          "name": "change_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_review_id": {
+          "name": "current_review_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "extracted_values_run_id_idx": {
+          "name": "extracted_values_run_id_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "extracted_values_version_id_document_versions_id_fk": {
+          "name": "extracted_values_version_id_document_versions_id_fk",
+          "tableFrom": "extracted_values",
+          "tableTo": "document_versions",
+          "columnsFrom": [
+            "version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "extracted_values_run_id_extraction_runs_id_fk": {
+          "name": "extracted_values_run_id_extraction_runs_id_fk",
+          "tableFrom": "extracted_values",
+          "tableTo": "extraction_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "extracted_values_baseline_value_fk": {
+          "name": "extracted_values_baseline_value_fk",
+          "tableFrom": "extracted_values",
+          "tableTo": "extracted_values",
+          "columnsFrom": [
+            "baseline_value_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "extracted_values_current_review_fk": {
+          "name": "extracted_values_current_review_fk",
+          "tableFrom": "extracted_values",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "id",
+            "current_review_id"
+          ],
+          "columnsTo": [
+            "value_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "extracted_values_id_field_type_uq": {
+          "name": "extracted_values_id_field_type_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "field_type"
+          ]
+        },
+        "extracted_values_version_field_key_uq": {
+          "name": "extracted_values_version_field_key_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "version_id",
+            "field_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "extracted_values_field_key_chk": {
+          "name": "extracted_values_field_key_chk",
+          "value": "field_key ~ '^[a-z][a-z0-9_]{0,62}$'"
+        },
+        "extracted_values_field_type_chk": {
+          "name": "extracted_values_field_type_chk",
+          "value": "field_type IN ('string', 'date', 'money', 'number', 'percent')"
+        },
+        "extracted_values_kind_chk": {
+          "name": "extracted_values_kind_chk",
+          "value": "kind IN ('value', 'gap')"
+        },
+        "extracted_values_attempted_quote_chk": {
+          "name": "extracted_values_attempted_quote_chk",
+          "value": "kind = 'gap' OR attempted_quote IS NULL"
+        },
+        "extracted_values_match_mode_chk": {
+          "name": "extracted_values_match_mode_chk",
+          "value": "match_mode IS NULL OR match_mode IN ('strict', 'quote_folded')"
+        },
+        "extracted_values_gap_code_chk": {
+          "name": "extracted_values_gap_code_chk",
+          "value": "gap_code IS NULL OR gap_code IN ('NOT_FOUND', 'MODEL_OMITTED', 'EVIDENCE_NOT_IN_TEXT', 'VALUE_NOT_SUPPORTED', 'UNPARSEABLE_VALUE', 'EVIDENCE_HIDDEN', 'CONFLICTING_EVIDENCE')"
+        },
+        "extracted_values_flags_chk": {
+          "name": "extracted_values_flags_chk",
+          "value": "flags <@ ARRAY['LOW_VISIBILITY', 'AMBIGUOUS_OCCURRENCE', 'TOKEN_AMBIGUOUS', 'AMBIGUOUS_DATE', 'QUOTE_FOLDED', 'WEAK_EVIDENCE_LINE', 'CONFLICTING_LINES', 'LINE_HINT_MISMATCH']::text[]"
+        },
+        "extracted_values_change_kind_chk": {
+          "name": "extracted_values_change_kind_chk",
+          "value": "change_kind IN ('new', 'same', 'changed')"
+        },
+        "extracted_values_baseline_chk": {
+          "name": "extracted_values_baseline_chk",
+          "value": "(change_kind = 'new') = (baseline_value_id IS NULL)"
+        },
+        "extracted_values_change_reason_chk": {
+          "name": "extracted_values_change_reason_chk",
+          "value": "(change_kind = 'changed') = (change_reason IS NOT NULL) AND (change_reason IS NULL OR change_reason IN ('VALUE_CHANGED', 'EVIDENCE_CHANGED', 'GAP_INVOLVED', 'WEAK_EVIDENCE_LINE', 'PARSER_CHANGED', 'POSSIBLE_AMENDMENT', 'CONFLICTING_EVIDENCE', 'EVIDENCE_HIDDEN', 'TYPE_CHANGED'))"
+        },
+        "extracted_values_gap_and_value_shape_chk": {
+          "name": "extracted_values_gap_and_value_shape_chk",
+          "value": "(\n        (kind = 'gap'\n          AND value IS NULL\n          AND evidence IS NULL\n          AND canonical_evidence IS NULL\n          AND gap_code IS NOT NULL\n          AND gap_reason IS NOT NULL)\n        OR\n        (kind = 'value'\n          AND gap_code IS NULL\n          AND gap_reason IS NULL\n          AND evidence IS NOT NULL\n          AND canonical_evidence IS NOT NULL\n          AND (\n    (field_type = 'string'\n      AND jsonb_typeof(value) = 'string'\n      AND char_length(value #>> '{}') BETWEEN 1 AND 2000\n      AND char_length(btrim(value #>> '{}')) >= 1)\n    OR (field_type = 'date'\n      AND jsonb_typeof(value) = 'string'\n      AND (value #>> '{}') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')\n    OR (field_type = 'money'\n      AND jsonb_typeof(value) = 'object'\n      AND jsonb_typeof(value -> 'amount') = 'string'\n      AND jsonb_typeof(value -> 'currency') = 'string'\n      AND (value - 'amount' - 'currency') = '{}'::jsonb\n      AND (value ->> 'amount') ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'\n      AND (value ->> 'currency') ~ '^[A-Z]{3}$')\n    OR (field_type IN ('number', 'percent')\n      AND jsonb_typeof(value) = 'string'\n      AND (value #>> '{}') ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$')\n  ))\n      )"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.reviews": {
+      "name": "reviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "value_id": {
+          "name": "value_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "field_type": {
+          "name": "field_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "corrected_value": {
+          "name": "corrected_value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "carried_from_review_id": {
+          "name": "carried_from_review_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "reviews_value_field_type_fk": {
+          "name": "reviews_value_field_type_fk",
+          "tableFrom": "reviews",
+          "tableTo": "extracted_values",
+          "columnsFrom": [
+            "value_id",
+            "field_type"
+          ],
+          "columnsTo": [
+            "id",
+            "field_type"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "reviews_carried_from_fk": {
+          "name": "reviews_carried_from_fk",
+          "tableFrom": "reviews",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "carried_from_review_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "reviews_value_id_id_uq": {
+          "name": "reviews_value_id_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "value_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "reviews_field_type_chk": {
+          "name": "reviews_field_type_chk",
+          "value": "field_type IN ('string', 'date', 'money', 'number', 'percent')"
+        },
+        "reviews_decision_chk": {
+          "name": "reviews_decision_chk",
+          "value": "decision IN ('approve', 'correct', 'revert')"
+        },
+        "reviews_corrected_value_chk": {
+          "name": "reviews_corrected_value_chk",
+          "value": "(decision = 'correct') = (corrected_value IS NOT NULL) AND (corrected_value IS NULL OR (\n    (field_type = 'string'\n      AND jsonb_typeof(corrected_value) = 'string'\n      AND char_length(corrected_value #>> '{}') BETWEEN 1 AND 2000\n      AND char_length(btrim(corrected_value #>> '{}')) >= 1)\n    OR (field_type = 'date'\n      AND jsonb_typeof(corrected_value) = 'string'\n      AND (corrected_value #>> '{}') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')\n    OR (field_type = 'money'\n      AND jsonb_typeof(corrected_value) = 'object'\n      AND jsonb_typeof(corrected_value -> 'amount') = 'string'\n      AND jsonb_typeof(corrected_value -> 'currency') = 'string'\n      AND (corrected_value - 'amount' - 'currency') = '{}'::jsonb\n      AND (corrected_value ->> 'amount') ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'\n      AND (corrected_value ->> 'currency') ~ '^[A-Z]{3}$')\n    OR (field_type IN ('number', 'percent')\n      AND jsonb_typeof(corrected_value) = 'string'\n      AND (corrected_value #>> '{}') ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$')\n  ))"
+        },
+        "reviews_note_len_chk": {
+          "name": "reviews_note_len_chk",
+          "value": "note IS NULL OR char_length(note) <= 1000"
+        },
+        "reviews_origin_chk": {
+          "name": "reviews_origin_chk",
+          "value": "origin IN ('human', 'carried')"
+        },
+        "reviews_carried_from_chk": {
+          "name": "reviews_carried_from_chk",
+          "value": "(origin = 'carried') = (carried_from_review_id IS NOT NULL)"
+        },
+        "reviews_carried_not_revert_chk": {
+          "name": "reviews_carried_not_revert_chk",
+          "value": "origin <> 'carried' OR decision <> 'revert'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
