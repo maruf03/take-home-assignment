@@ -2,8 +2,8 @@ import type { TextRanges } from '@app/contracts/dto';
 import type { ChangeKind, ChangeReason, DateOrder, ReviewDecision } from '@app/contracts/status';
 import { equalValues } from '@app/contracts/values';
 import { analyzeLineAnchor, extractTypedTokens } from '../evidence/tokenizers.js';
-import { lineIndex } from '../text/lines.js';
-import { matchNormalize } from '../text/normalize.js';
+import { findLinesTouchingSpan, lineIndex } from '../text/lines.js';
+import { buildNormIndex, findAllNormalizedOccurrences, matchNormalize } from '../text/normalize.js';
 import type { BaselineFieldSnapshot, ValidatedFieldResult } from '../types.js';
 
 export interface CarryoverContext {
@@ -81,17 +81,24 @@ export function classifyChange(
     return { changeKind: 'changed', changeReason: 'EVIDENCE_CHANGED' };
   }
 
-  // 5. EVIDENCE_HIDDEN: baseline canonical line is hidden in nextText (and not visibly present).
+  // 5. EVIDENCE_HIDDEN: baseline canonical line(s) are hidden in nextText (and not visibly present).
+  // Uses normalized span matching so multi-line baseline canonicalEvidence is handled identically.
   const nextLines = lineIndex(ctx.nextText);
+  const nextNormIdx = buildNormIndex(ctx.nextText);
   let hasHiddenBaselineLine = false;
   let hasVisibleBaselineLine = false;
-  for (const line of nextLines) {
-    if (matchNormalize(line.text) === baselineCanonical) {
-      if (isLineHidden(line.start, line.end, ctx.nextRanges)) {
-        hasHiddenBaselineLine = true;
-      } else {
-        hasVisibleBaselineLine = true;
-      }
+  for (const occ of findAllNormalizedOccurrences(nextNormIdx, baselineCanonical)) {
+    const touched = findLinesTouchingSpan(nextLines, occ.start, occ.end);
+    if (touched.length === 0) {
+      continue;
+    }
+    if (matchNormalize(touched.map((l) => l.text).join(' ')) !== baselineCanonical) {
+      continue;
+    }
+    if (touched.some((l) => isLineHidden(l.start, l.end, ctx.nextRanges))) {
+      hasHiddenBaselineLine = true;
+    } else {
+      hasVisibleBaselineLine = true;
     }
   }
   if (hasHiddenBaselineLine && !hasVisibleBaselineLine) {
@@ -113,6 +120,7 @@ export function classifyChange(
   }
 
   // 8. POSSIBLE_AMENDMENT: label-anchor check against lines ADDED in nextText (line-set diff of M(lines)).
+  // Compare against both stripped labelAnchor (handles mid-line tokens) and raw normLine.
   if (next.fieldType !== 'string' && baseAnchor.letterCount >= 2) {
     const baselineLineSet = new Set(lineIndex(ctx.baselineText).map((l) => matchNormalize(l.text)));
     const anchorLower = baseAnchor.labelAnchor.toLowerCase();
@@ -125,7 +133,11 @@ export function classifyChange(
       if (baselineLineSet.has(normLine)) {
         continue;
       }
-      if (!normLine.toLowerCase().includes(anchorLower)) {
+      const nextAnchor = analyzeLineAnchor(next.fieldType, normLine, ctx.dateOrder);
+      if (
+        !nextAnchor.labelAnchor.toLowerCase().includes(anchorLower) &&
+        !normLine.toLowerCase().includes(anchorLower)
+      ) {
         continue;
       }
       const tokens = extractTypedTokens(next.fieldType, normLine, ctx.dateOrder);

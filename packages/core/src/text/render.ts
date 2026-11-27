@@ -118,6 +118,19 @@ export function planChunks(
     }
   }
 
+  const wrapperOverhead = `<document-${nonce} data-untrusted="true">\n\n</document-${nonce}>`
+    .length;
+  const pageBlockLength = (pageLines: readonly TextLine[]): number => {
+    const pageNum = pageLines[0]!.pageNumber;
+    let len = `<page ${pageNum}>\n\n</page>`.length;
+    for (let i = 0; i < pageLines.length; i++) {
+      const l = pageLines[i]!;
+      len += formatLinePrefix(l.lineNumber).length + l.text.length + (i > 0 ? 1 : 0);
+    }
+    return len;
+  };
+  const pageLengths = pages.map(pageBlockLength);
+
   const windows: ChunkWindow[] = [];
   let pageCursor = 0;
   let prevWindowLines: TextLine[] = [];
@@ -127,25 +140,26 @@ export function planChunks(
       windows.length > 0 && overlapLines > 0 ? prevWindowLines.slice(-overlapLines) : [];
 
     const windowLines: TextLine[] = [...overlap];
-    const startPage = pages[pageCursor]![0]!.pageNumber;
-    let endPage = startPage;
+    let estimatedChars =
+      overlap.length > 0 ? renderLinesGroupedByPage(overlap, nonce).length : wrapperOverhead;
+    let endPage = pages[pageCursor]![0]!.pageNumber;
     let pagesAdded = 0;
 
     while (pageCursor < pages.length) {
       const candidatePage = pages[pageCursor]!;
-      const candidateLines = [...windowLines, ...candidatePage];
-      const renderedCandidate = renderLinesGroupedByPage(candidateLines, nonce);
+      const addedLen = pageLengths[pageCursor]! + (windowLines.length > 0 ? 1 : 0);
 
-      if (pagesAdded > 0 && renderedCandidate.length > chunkCharLimit) {
+      if (pagesAdded > 0 && estimatedChars + addedLen > chunkCharLimit) {
         break;
       }
 
       windowLines.push(...candidatePage);
+      estimatedChars += addedLen;
       endPage = candidatePage[0]!.pageNumber;
       pagesAdded += 1;
       pageCursor += 1;
 
-      if (renderedCandidate.length >= chunkCharLimit) {
+      if (estimatedChars >= chunkCharLimit) {
         break;
       }
     }
@@ -153,7 +167,7 @@ export function planChunks(
     const rendered = renderLinesGroupedByPage(windowLines, nonce);
     windows.push({
       chunkIndex: windows.length,
-      startPage,
+      startPage: windowLines[0]!.pageNumber,
       endPage,
       startLine: windowLines[0]!.lineNumber,
       endLine: windowLines[windowLines.length - 1]!.lineNumber,

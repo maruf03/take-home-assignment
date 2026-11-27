@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildNormIndex,
   classifyChange,
+  lineIndex,
+  lineNumberAtOffset,
+  maskHiddenText,
   matchNormalize,
   normSpanToOrigSpan,
   validateExtraction,
@@ -28,10 +31,14 @@ describe('fast-check properties (§5.2, §5.5, §5.6)', () => {
     );
   });
 
-  it('buildNormIndex offset map round-trips any normalized non-empty token span back to original text', () => {
+  it('buildNormIndex offset map round-trips any normalized non-empty token span back to original text (including astral Unicode)', () => {
+    const wordArb = fc.oneof(
+      fc.stringMatching(/^[A-Za-z0-9$.,:-]{1,12}$/),
+      fc.constantFrom('💰$100', '📄Doc', 'café', '½-inch'),
+    );
     fc.assert(
       fc.property(
-        fc.array(fc.stringMatching(/^[A-Za-z0-9$.,:-]{1,12}$/), { minLength: 1, maxLength: 10 }),
+        fc.array(wordArb, { minLength: 1, maxLength: 10 }),
         fc.array(fc.constantFrom(' ', '  ', '\t', '\n', ' \n '), { minLength: 10, maxLength: 10 }),
         (words, seps) => {
           let text = seps[0]!;
@@ -56,6 +63,38 @@ describe('fast-check properties (§5.2, §5.5, §5.6)', () => {
 
           const fullOrig = normSpanToOrigSpan(idx, 0, idx.norm.length);
           expect(matchNormalize(text.slice(fullOrig.start, fullOrig.end))).toBe(idx.norm);
+        },
+      ),
+    );
+  });
+
+  it('lineIndex and maskHiddenText preserve exact UTF-16 lengths, line counts, and page breaks', () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.array(fc.stringMatching(/^[A-Za-z0-9 ]{0,20}$/), { minLength: 1, maxLength: 5 }),
+          { minLength: 1, maxLength: 4 },
+        ),
+        (pages) => {
+          const text = pages.map((p) => p.join('\n')).join('\f');
+          const lines = lineIndex(text);
+          const expectedLineCount = pages.reduce((sum, p) => sum + p.length, 0);
+          expect(lines).toHaveLength(expectedLineCount);
+
+          for (let i = 0; i < lines.length; i++) {
+            const l = lines[i]!;
+            expect(l.lineNumber).toBe(i + 1);
+            expect(text.slice(l.start, l.end)).toBe(l.text);
+            expect(lineNumberAtOffset(lines, l.start)).toBe(l.lineNumber);
+          }
+
+          const mid = Math.floor(text.length / 2);
+          const masked = maskHiddenText(text, {
+            hidden: [[0, mid, 'OFF_PAGE']],
+            lowVisibility: [],
+          });
+          expect(masked.length).toBe(text.length);
+          expect(lineIndex(masked).length).toBe(lines.length);
         },
       ),
     );

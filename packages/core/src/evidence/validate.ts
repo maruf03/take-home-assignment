@@ -161,7 +161,7 @@ export function validateExtraction(
     }
 
     const rawValueStr = candidate.rawValue ?? formatRawValue(candidate.value);
-    const citedLine = candidate.line;
+    const citedLine = candidate.line !== null && candidate.line >= 1 ? candidate.line : null;
 
     // Step 2: found=false or value null -> NOT_FOUND.
     if (!candidate.found || candidate.value === null) {
@@ -265,6 +265,9 @@ export function validateExtraction(
     }
 
     // Step 7: value support check inside each visible occurrence.
+    // For scalar types, also verify alignment against tokens extracted from the full enclosing
+    // touched line(s) so substring quotes cannot truncate decimals (`$1,234` in `$1,234.56`),
+    // strip signs (`$1,234.56` in `($1,234.56)`), or bypass model-code/list-ordinal/disagreement guards.
     const supportedOccurrences: SupportedOccurrence[] = [];
     for (const occ of visibleRawOccurrences) {
       const spanText = text.slice(occ.start, occ.end);
@@ -273,6 +276,27 @@ export function validateExtraction(
         continue;
       }
       const touched = findLinesTouchingSpan(lines, occ.start, occ.end);
+      if (field.fieldType !== 'string' && touched.length > 0) {
+        const enclosingStart = touched[0]!.start;
+        const enclosingEnd = touched[touched.length - 1]!.end;
+        const enclosingText = text.slice(enclosingStart, enclosingEnd);
+        const relStart = occ.start - enclosingStart;
+        const relEnd = occ.end - enclosingStart;
+        const enclosingTokens = extractTypedTokens(
+          field.fieldType,
+          enclosingText,
+          template.dateOrder,
+        );
+        const alignedEnclosing = enclosingTokens.some(
+          (et) =>
+            spansOverlap(et.start, et.end, relStart, relEnd) &&
+            equalValues(field.fieldType, et.value, canonicalValue),
+        );
+        if (!alignedEnclosing) {
+          continue;
+        }
+      }
+
       const canonicalEvidence = matchNormalize(touched.map((l) => l.text).join(' '));
       const line = lineNumberAtOffset(lines, occ.start);
       supportedOccurrences.push({
@@ -362,7 +386,11 @@ export function validateExtraction(
             continue;
           }
           const otherNorm = matchNormalize(other.text);
-          if (!otherNorm.toLowerCase().startsWith(prefixLower)) {
+          const otherAnchor = analyzeLineAnchor(field.fieldType, otherNorm, template.dateOrder);
+          if (
+            !otherAnchor.labelAnchor.toLowerCase().startsWith(prefixLower) &&
+            !otherNorm.toLowerCase().startsWith(prefixLower)
+          ) {
             continue;
           }
           const otherTokens = extractTypedTokens(field.fieldType, otherNorm, template.dateOrder);
@@ -466,9 +494,12 @@ export function mergeChunkResults(
       } else {
         const summary = distinctGroups
           .map((g) => {
-            const first = g[0]!;
-            const formatted = formatTypedValue(field.fieldType, first.value);
-            const lineNum = first.visibleOccurrences[0]?.line ?? first.citedLine ?? '?';
+            const earliest = [...g].sort(
+              (a, b) =>
+                a.evidenceStart - b.evidenceStart || (a.chunkIndex ?? 0) - (b.chunkIndex ?? 0),
+            )[0]!;
+            const formatted = formatTypedValue(field.fieldType, earliest.value);
+            const lineNum = earliest.visibleOccurrences[0]?.line ?? earliest.citedLine ?? '?';
             return `${formatted} (line ${lineNum})`;
           })
           .join(' vs ');
@@ -489,7 +520,15 @@ export function mergeChunkResults(
       continue;
     }
 
-    gaps.sort((a, b) => GAP_MERGE_PRIORITY[a.gapCode] - GAP_MERGE_PRIORITY[b.gapCode]);
+    gaps.sort((a, b) => {
+      const prioDiff = GAP_MERGE_PRIORITY[a.gapCode] - GAP_MERGE_PRIORITY[b.gapCode];
+      if (prioDiff !== 0) {
+        return prioDiff;
+      }
+      const aHasQuote = a.attemptedQuote ? 0 : 1;
+      const bHasQuote = b.attemptedQuote ? 0 : 1;
+      return aHasQuote - bHasQuote;
+    });
     merged.push(gaps[0]!);
   }
 

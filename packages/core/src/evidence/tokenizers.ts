@@ -23,9 +23,18 @@ const CURRENCY_SYMBOL_TO_ISO: Readonly<Record<string, string>> = {
   '£': 'GBP',
 };
 
-// Verified money tokenizer regex from spec §5.5 (bounded, zero nested quantifiers).
-const MONEY_TOKEN_REGEX =
-  /(?<![\w.])(?<neg>-)?(?<open>\()?(?:(?<pre>USD|EUR|GBP|CAD|AUD|NZD|HKD|SGD|MXN|JPY|CHF|CNY|INR)\s?)?(?<sym>[$€£])?\s?(?<num>\d{1,3}(?:,\d{3})+|\d+)(?:\.(?<frac>\d+))?(?:\s?(?<post>USD|EUR|GBP|CAD|AUD|NZD|HKD|SGD|MXN|JPY|CHF|CNY|INR)\b)?(?:(?<close>\))(?:\s?(?<post2>USD|EUR|GBP|CAD|AUD|NZD|HKD|SGD|MXN|JPY|CHF|CNY|INR)\b)?)?/g;
+const ISO_CODES_ALT = 'USD|EUR|GBP|CAD|AUD|NZD|HKD|SGD|MXN|JPY|CHF|CNY|INR';
+
+// Hardened money tokenizer based on spec §5.5:
+// - Allows bounded horizontal whitespace around markers ([ \t]{0,4})
+// - Allows negative sign before or after currency marker (-$10, $-10, USD -10)
+// - Captures surrounding unsupported currencies and enforces trailing boundaries in code
+const MONEY_TOKEN_REGEX = new RegExp(
+  `(?<![\\w.])(?<neg1>-)?(?<open>\\()?(?:(?<pre>${ISO_CODES_ALT})[ \\t]{0,4})?(?<neg2>-)?(?<sym>[$€£])?[ \\t]{0,4}(?<neg3>-)?(?<num>\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.(?<frac>\\d+))?(?:[ \\t]{0,4}(?<post>${ISO_CODES_ALT})\\b)?(?:(?<close>\\))(?:[ \\t]{0,4}(?<post2>${ISO_CODES_ALT})\\b)?)?`,
+  'g',
+);
+
+const LEADING_ISO_PREFIX_REGEX = new RegExp(`\\b(${ISO_CODES_ALT})[ \\t]*[-+(]?[ \\t]*$`);
 
 const PERCENT_TOKEN_REGEX =
   /(?<![\w.])(?<num>-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(?:%|(?:percent|per cent)\b)/gi;
@@ -40,8 +49,7 @@ const DATE_NUMERIC_REGEX = /(?<!\d)(\d{1,2})([/-])(\d{1,2})\2(\d{4})(?!\d)/g;
 
 const LIST_ORDINAL_PREFIX_REGEX = /^(\s*\d+[.)]\s)/;
 
-const SMALL_NUMBER_WORDS: Readonly<Record<string, number>> = {
-  zero: 0,
+const UNITS_WORDS: Readonly<Record<string, number>> = {
   one: 1,
   two: 2,
   three: 3,
@@ -51,6 +59,9 @@ const SMALL_NUMBER_WORDS: Readonly<Record<string, number>> = {
   seven: 7,
   eight: 8,
   nine: 9,
+};
+
+const TEENS_WORDS: Readonly<Record<string, number>> = {
   ten: 10,
   eleven: 11,
   twelve: 12,
@@ -74,131 +85,23 @@ const TENS_WORDS: Readonly<Record<string, number>> = {
   ninety: 90,
 };
 
-const NUMBER_WORD_LIST = [
-  ...Object.keys(SMALL_NUMBER_WORDS),
+const ALL_NUMBER_WORDS: ReadonlySet<string> = new Set([
+  'zero',
+  ...Object.keys(UNITS_WORDS),
+  ...Object.keys(TEENS_WORDS),
   ...Object.keys(TENS_WORDS),
   'hundred',
   'thousand',
-].join('|');
+]);
 
-const SPELLED_NUMBER_REGEX = new RegExp(
-  `\\b(?:${NUMBER_WORD_LIST})(?:(?:[\\s-]+(?:and[\\s-]+)?)(?:${NUMBER_WORD_LIST}))*\\b(?:\\s*\\(\\s*(\\d{1,3}(?:,\\d{3})*|\\d+)\\s*\\))?`,
-  'gi',
-);
+const WORD_TOKEN_REGEX = /[A-Za-z]+/g;
+const PAREN_NUMBER_SUFFIX_REGEX = /^\s*\(\s*(\d{1,3}(?:,\d{3})*|\d+)\s*\)/;
 
 const PLAIN_NUMBER_REGEX =
   /(?<![\w.$€£/-])(?<num>-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(?![\w%/-])/g;
 
-export function extractMoneyTokens(span: string): ExtractedToken[] {
-  const tokens: ExtractedToken[] = [];
-  MONEY_TOKEN_REGEX.lastIndex = 0;
-
-  let match: RegExpExecArray | null;
-  while ((match = MONEY_TOKEN_REGEX.exec(span)) !== null) {
-    const groups = match.groups;
-    if (!groups) {
-      continue;
-    }
-
-    const neg = groups['neg'];
-    const open = groups['open'];
-    const pre = groups['pre'];
-    const sym = groups['sym'];
-    const num = groups['num'];
-    const frac = groups['frac'];
-    const post = groups['post'];
-    const close = groups['close'];
-    const post2 = groups['post2'];
-
-    if (!num) {
-      continue;
-    }
-
-    // Rule 1: at least one currency marker is required.
-    const markers: string[] = [];
-    if (pre) markers.push(pre);
-    if (sym && CURRENCY_SYMBOL_TO_ISO[sym]) markers.push(CURRENCY_SYMBOL_TO_ISO[sym]!);
-    if (post) markers.push(post);
-    if (post2) markers.push(post2);
-
-    if (markers.length === 0) {
-      continue;
-    }
-
-    // Rule 2: reject unsupported ISO currencies (CAD, AUD, etc.).
-    if (markers.some((m) => !SUPPORTED_MONEY_CURRENCIES.has(m))) {
-      continue;
-    }
-
-    // Rule 3: all currency markers must agree.
-    const currency = markers[0]!;
-    if (markers.some((m) => m !== currency)) {
-      continue;
-    }
-
-    // Rule 4: negative means leading `-` OR paired `(` … `)`.
-    // Unmatched `)` is ignored (e.g. `(up to $2,540)` -> +2540).
-    const isParenNegative = Boolean(open && close);
-    if (neg && isParenNegative) {
-      continue;
-    }
-
-    const rawDecimal =
-      frac !== undefined ? `${num.replaceAll(',', '')}.${frac}` : num.replaceAll(',', '');
-    let amount: string;
-    try {
-      amount = canonicalDecimal(rawDecimal);
-    } catch {
-      continue;
-    }
-
-    const isNegative = Boolean(neg) || isParenNegative;
-    const signedAmount = isNegative && amount !== '0' ? `-${amount}` : amount;
-
-    // Exclude an unmatched trailing `)` from the token span when open wasn't matched.
-    let end = match.index + match[0].length;
-    let raw = match[0];
-    if (!open && close && !post2 && raw.endsWith(')')) {
-      raw = raw.slice(0, -1);
-      end -= 1;
-    }
-
-    const value: MoneyValue = { amount: signedAmount, currency };
-    tokens.push({
-      raw,
-      start: match.index,
-      end,
-      value,
-    });
-  }
-
-  return tokens;
-}
-
-export function extractPercentTokens(span: string): ExtractedToken[] {
-  const tokens: ExtractedToken[] = [];
-  PERCENT_TOKEN_REGEX.lastIndex = 0;
-
-  let match: RegExpExecArray | null;
-  while ((match = PERCENT_TOKEN_REGEX.exec(span)) !== null) {
-    const rawNum = match.groups?.['num'];
-    if (!rawNum) {
-      continue;
-    }
-    try {
-      const value = canonicalDecimal(rawNum.replaceAll(',', ''));
-      tokens.push({
-        raw: match[0],
-        start: match.index,
-        end: match.index + match[0].length,
-        value,
-      });
-    } catch {
-      // ignore unparseable
-    }
-  }
-
-  return tokens;
+function spansOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && bStart < aEnd;
 }
 
 export function extractDateTokens(span: string, dateOrder: DateOrder): ExtractedToken[] {
@@ -237,7 +140,6 @@ export function extractDateTokens(span: string, dateOrder: DateOrder): Extracted
   collect(DATE_DAY_FIRST_REGEX);
   collect(DATE_NUMERIC_REGEX, true);
 
-  // Sort by start ascending, longest match first, and drop overlapping shorter matches.
   candidates.sort((a, b) => a.start - b.start || b.end - a.end);
   const nonOverlapping: ExtractedToken[] = [];
   for (const token of candidates) {
@@ -250,57 +152,313 @@ export function extractDateTokens(span: string, dateOrder: DateOrder): Extracted
   return nonOverlapping;
 }
 
-/**
- * Parses English spelled-out non-negative integers 0..999,999 (spec §5.5).
- */
-export function parseSpelledNumber(phrase: string): number | null {
-  const words = phrase
-    .toLowerCase()
-    .split(/[\s-]+/u)
-    .filter((w) => w.length > 0 && w !== 'and');
+export function extractMoneyTokens(span: string): ExtractedToken[] {
+  const tokens: ExtractedToken[] = [];
+  const dateSpans: Array<[number, number]> = extractDateTokens(span, 'MDY').map((d) => [
+    d.start,
+    d.end,
+  ]);
+  MONEY_TOKEN_REGEX.lastIndex = 0;
 
-  if (words.length === 0) {
+  let match: RegExpExecArray | null;
+  while ((match = MONEY_TOKEN_REGEX.exec(span)) !== null) {
+    const groups = match.groups;
+    if (!groups) {
+      continue;
+    }
+
+    const neg1 = groups['neg1'];
+    const open = groups['open'];
+    const pre = groups['pre'];
+    const neg2 = groups['neg2'];
+    const sym = groups['sym'];
+    const neg3 = groups['neg3'];
+    const num = groups['num'];
+    const frac = groups['frac'];
+    const post = groups['post'];
+    const close = groups['close'];
+    const post2 = groups['post2'];
+
+    if (!num) {
+      continue;
+    }
+
+    // Exclude any digits belonging to a date (e.g. `2025-09-14 USD` must never yield `14 USD`).
+    const matchStart = match.index;
+    const matchEndFull = match.index + match[0].length;
+    if (dateSpans.some(([ds, de]) => spansOverlap(matchStart, matchEndFull, ds, de))) {
+      continue;
+    }
+
+    // Rule 1: collect all currency markers, including any immediately preceding ISO code
+    // that separated from `$` via `-`, `(`, or whitespace (e.g. `CAD -$1,234.00`, `CAD ($1,234.00)`).
+    const markers: string[] = [];
+    const lookbehind = span.slice(Math.max(0, matchStart - 12), matchStart);
+    const prefixIso = LEADING_ISO_PREFIX_REGEX.exec(lookbehind);
+    if (prefixIso?.[1]) {
+      markers.push(prefixIso[1]);
+    }
+    if (pre) markers.push(pre);
+    if (sym && CURRENCY_SYMBOL_TO_ISO[sym]) markers.push(CURRENCY_SYMBOL_TO_ISO[sym]!);
+    if (post) markers.push(post);
+    if (post2) markers.push(post2);
+
+    if (markers.length === 0) {
+      continue;
+    }
+
+    // Rule 2: reject unsupported ISO currencies (CAD, AUD, etc.).
+    if (markers.some((m) => !SUPPORTED_MONEY_CURRENCIES.has(m))) {
+      continue;
+    }
+
+    // Rule 3: all currency markers must agree.
+    const currency = markers[0]!;
+    if (markers.some((m) => m !== currency)) {
+      continue;
+    }
+
+    // Rule 4: negative means a single `-` OR paired `(` … `)`. Reject conflicting signs.
+    const isParenNegative = Boolean(open && close);
+    const minusCount = (neg1 ? 1 : 0) + (neg2 ? 1 : 0) + (neg3 ? 1 : 0);
+    if (minusCount > 1 || (minusCount > 0 && isParenNegative)) {
+      continue;
+    }
+
+    // Exclude an unmatched trailing `)` from the token span when open wasn't matched.
+    let end = matchEndFull;
+    let raw = match[0];
+    if (!open && close && !post2 && raw.endsWith(')')) {
+      raw = raw.slice(0, -1);
+      end -= 1;
+    }
+
+    // Rule 5: enforce trailing boundary so `$1.5M`, `$100k`, `$100%`, `$1,2345` are rejected.
+    const nextChar = span[end];
+    if (nextChar !== undefined) {
+      if (/[A-Za-z0-9%]/.test(nextChar)) {
+        continue;
+      }
+      if ((nextChar === '.' || nextChar === ',') && span[end + 1] && /\d/.test(span[end + 1]!)) {
+        continue;
+      }
+    }
+
+    const rawDecimal =
+      frac !== undefined ? `${num.replaceAll(',', '')}.${frac}` : num.replaceAll(',', '');
+    let amount: string;
+    try {
+      amount = canonicalDecimal(rawDecimal);
+    } catch {
+      continue;
+    }
+
+    const isNegative = minusCount === 1 || isParenNegative;
+    const signedAmount = isNegative && amount !== '0' ? `-${amount}` : amount;
+
+    const value: MoneyValue = { amount: signedAmount, currency };
+    tokens.push({
+      raw,
+      start: matchStart,
+      end,
+      value,
+    });
+  }
+
+  return tokens;
+}
+
+export function extractPercentTokens(span: string): ExtractedToken[] {
+  const tokens: ExtractedToken[] = [];
+  PERCENT_TOKEN_REGEX.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = PERCENT_TOKEN_REGEX.exec(span)) !== null) {
+    const rawNum = match.groups?.['num'];
+    if (!rawNum) {
+      continue;
+    }
+    try {
+      const value = canonicalDecimal(rawNum.replaceAll(',', ''));
+      tokens.push({
+        raw: match[0],
+        start: match.index,
+        end: match.index + match[0].length,
+        value,
+      });
+    } catch {
+      // ignore unparseable
+    }
+  }
+
+  return tokens;
+}
+
+interface WordSpan {
+  readonly word: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Parses a strictly valid English `<1000` number group (1..999) starting at `words[idx]`.
+ * Grammar:
+ *   under1000 := (UNIT "hundred" (["and"] under100)?) | under100
+ *   under100  := TEEN | (TENS UNIT?) | UNIT
+ */
+function parseUnderThousandGroup(
+  words: readonly WordSpan[],
+  startIdx: number,
+  canJoin: (prevEnd: number, nextStart: number) => boolean,
+): { value: number; nextIdx: number } | null {
+  let idx = startIdx;
+  const w0 = words[idx]?.word;
+  if (!w0) {
     return null;
   }
 
   let total = 0;
-  let current = 0;
-  let sawAny = false;
+  let consumed = false;
 
-  for (const word of words) {
-    if (word in SMALL_NUMBER_WORDS) {
-      current += SMALL_NUMBER_WORDS[word]!;
-      sawAny = true;
-    } else if (word in TENS_WORDS) {
-      current += TENS_WORDS[word]!;
-      sawAny = true;
-    } else if (word === 'hundred') {
-      if (current === 0) {
-        current = 1;
+  // Optional `UNIT hundred`
+  if (
+    w0 in UNITS_WORDS &&
+    idx + 1 < words.length &&
+    words[idx + 1]!.word === 'hundred' &&
+    canJoin(words[idx]!.end, words[idx + 1]!.start)
+  ) {
+    total += UNITS_WORDS[w0]! * 100;
+    idx += 2;
+    consumed = true;
+
+    // Optional `and` ONLY after `hundred` if followed by a valid <100 number
+    if (
+      idx < words.length &&
+      words[idx]!.word === 'and' &&
+      canJoin(words[idx - 1]!.end, words[idx]!.start) &&
+      idx + 1 < words.length &&
+      canJoin(words[idx]!.end, words[idx + 1]!.start)
+    ) {
+      const afterAnd = words[idx + 1]!.word;
+      if (afterAnd in UNITS_WORDS || afterAnd in TEENS_WORDS || afterAnd in TENS_WORDS) {
+        idx += 1;
+      } else {
+        return { value: total, nextIdx: idx };
       }
-      current *= 100;
-      sawAny = true;
-    } else if (word === 'thousand') {
-      if (current === 0) {
-        current = 1;
-      }
-      total += current * 1000;
-      current = 0;
-      sawAny = true;
-    } else {
-      return null;
     }
   }
 
-  if (!sawAny) {
-    return null;
+  // Optional <100 tail (if continuing after hundred, verify separator)
+  if (idx < words.length && (!consumed || canJoin(words[idx - 1]!.end, words[idx]!.start))) {
+    const w = words[idx]!.word;
+    if (w in TEENS_WORDS) {
+      total += TEENS_WORDS[w]!;
+      idx += 1;
+      consumed = true;
+    } else if (w in TENS_WORDS) {
+      total += TENS_WORDS[w]!;
+      idx += 1;
+      consumed = true;
+      if (
+        idx < words.length &&
+        words[idx]!.word in UNITS_WORDS &&
+        canJoin(words[idx - 1]!.end, words[idx]!.start)
+      ) {
+        total += UNITS_WORDS[words[idx]!.word]!;
+        idx += 1;
+      }
+    } else if (w in UNITS_WORDS) {
+      total += UNITS_WORDS[w]!;
+      idx += 1;
+      consumed = true;
+    }
   }
-  const result = total + current;
-  return result >= 0 && result <= 999_999 ? result : null;
+
+  return consumed ? { value: total, nextIdx: idx } : null;
 }
 
-function spansOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart < bEnd && bStart < aEnd;
+/**
+ * Parses a strictly valid English spelled-out number 0..999,999 starting at `words[startIdx]`.
+ * Grammar:
+ *   number := "zero" | (under1000 "thousand" (["and"] under1000)?) | under1000
+ */
+function parseSpelledFromWords(
+  words: readonly WordSpan[],
+  startIdx: number,
+  canJoin: (prevEnd: number, nextStart: number) => boolean,
+): { value: number; nextIdx: number } | null {
+  const first = words[startIdx];
+  if (!first) {
+    return null;
+  }
+  if (first.word === 'zero') {
+    return { value: 0, nextIdx: startIdx + 1 };
+  }
+
+  const head = parseUnderThousandGroup(words, startIdx, canJoin);
+  if (!head) {
+    return null;
+  }
+
+  let idx = head.nextIdx;
+  if (
+    idx < words.length &&
+    words[idx]!.word === 'thousand' &&
+    canJoin(words[idx - 1]!.end, words[idx]!.start)
+  ) {
+    let total = head.value * 1000;
+    idx += 1;
+
+    let tailStart = idx;
+    if (
+      tailStart < words.length &&
+      words[tailStart]!.word === 'and' &&
+      canJoin(words[tailStart - 1]!.end, words[tailStart]!.start)
+    ) {
+      tailStart += 1;
+    }
+
+    if (tailStart < words.length && canJoin(words[tailStart - 1]!.end, words[tailStart]!.start)) {
+      const tail = parseUnderThousandGroup(words, tailStart, canJoin);
+      if (tail) {
+        total += tail.value;
+        idx = tail.nextIdx;
+      }
+    }
+
+    return total <= 999_999 ? { value: total, nextIdx: idx } : null;
+  }
+
+  return head;
+}
+
+/**
+ * Parses a standalone English spelled-out integer 0..999,999 via strict grammar (spec §5.5).
+ * Rejects invalid combinations like `"one and two"`, `"twenty thirty"`, `"one hundred hundred"`.
+ */
+export function parseSpelledNumber(phrase: string): number | null {
+  const words: WordSpan[] = [];
+  WORD_TOKEN_REGEX.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = WORD_TOKEN_REGEX.exec(phrase)) !== null) {
+    words.push({
+      word: m[0].toLowerCase(),
+      start: m.index,
+      end: m.index + m[0].length,
+    });
+  }
+  if (words.length === 0) {
+    return null;
+  }
+
+  const canJoin = (prevEnd: number, nextStart: number): boolean =>
+    /^[\s-]+$/u.test(phrase.slice(prevEnd, nextStart));
+
+  const parsed = parseSpelledFromWords(words, 0, canJoin);
+  if (!parsed || parsed.nextIdx !== words.length) {
+    return null;
+  }
+  return parsed.value;
 }
 
 export function extractNumberTokens(span: string): ExtractedToken[] {
@@ -330,40 +488,64 @@ export function extractNumberTokens(span: string): ExtractedToken[] {
     excludedSpans.push([tok.start, tok.end]);
   }
 
-  // 3. Parse spelled-out numbers (and paired `twenty-four (24)` forms).
-  SPELLED_NUMBER_REGEX.lastIndex = 0;
-  let spelledMatch: RegExpExecArray | null;
-  while ((spelledMatch = SPELLED_NUMBER_REGEX.exec(span)) !== null) {
-    const start = spelledMatch.index;
-    const end = start + spelledMatch[0].length;
+  // 3. Parse spelled-out numbers with strict grammar (stopping cleanly on non-grammar boundaries
+  //    so `"one and two"` yields `1` and `2` separately instead of `3`, and handling `"twenty-four (24)"`).
+  const words: WordSpan[] = [];
+  WORD_TOKEN_REGEX.lastIndex = 0;
+  let wm: RegExpExecArray | null;
+  while ((wm = WORD_TOKEN_REGEX.exec(span)) !== null) {
+    words.push({
+      word: wm[0].toLowerCase(),
+      start: wm.index,
+      end: wm.index + wm[0].length,
+    });
+  }
+
+  const canJoinWords = (prevEnd: number, nextStart: number): boolean =>
+    /^[\s-]+$/u.test(span.slice(prevEnd, nextStart));
+
+  let wi = 0;
+  while (wi < words.length) {
+    const w = words[wi]!;
+    if (!ALL_NUMBER_WORDS.has(w.word)) {
+      wi += 1;
+      continue;
+    }
+
+    const parsed = parseSpelledFromWords(words, wi, canJoinWords);
+    if (!parsed) {
+      wi += 1;
+      continue;
+    }
+
+    const start = w.start;
+    let end = words[parsed.nextIdx - 1]!.end;
+    wi = parsed.nextIdx;
+
     if (excludedSpans.some(([es, ee]) => spansOverlap(start, end, es, ee))) {
       continue;
     }
 
-    const full = spelledMatch[0];
-    const parenDigits = spelledMatch[1];
-    const wordPart = parenDigits !== undefined ? full.slice(0, full.indexOf('(')).trim() : full;
-    const parsedWord = parseSpelledNumber(wordPart);
-    if (parsedWord === null) {
-      continue;
-    }
-
-    // Always exclude this span from plain-number extraction so `(24)` or mismatched `(12)` is handled here.
-    excludedSpans.push([start, end]);
-
-    if (parenDigits !== undefined) {
-      const numericParen = Number(parenDigits.replaceAll(',', ''));
-      if (numericParen !== parsedWord) {
-        // Spec §5.5: forms like "twenty-four (12)" disagree -> check fails (emit no token).
+    // Check for optional repeating parenthesized digits: `twenty-four (24)`.
+    const suffixMatch = PAREN_NUMBER_SUFFIX_REGEX.exec(span.slice(end));
+    if (suffixMatch?.[1]) {
+      const parenEnd = end + suffixMatch[0].length;
+      const numericParen = Number(suffixMatch[1].replaceAll(',', ''));
+      excludedSpans.push([start, parenEnd]);
+      if (numericParen !== parsed.value) {
+        // Disagreement (e.g. `twenty-four (12)`) -> reject both!
         continue;
       }
+      end = parenEnd;
+    } else {
+      excludedSpans.push([start, end]);
     }
 
     tokens.push({
-      raw: full,
+      raw: span.slice(start, end),
       start,
       end,
-      value: String(parsedWord),
+      value: String(parsed.value),
     });
   }
 

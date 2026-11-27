@@ -193,7 +193,7 @@ describe('[I6] Rule A prime edge cases and decideCarry', () => {
       }),
     ).toEqual({ changeKind: 'changed', changeReason: 'TYPE_CHANGED' });
 
-    // GAP_INVOLVED (gap -> gap and value -> gap)
+    // GAP_INVOLVED (value -> gap AND gap -> gap)
     const gapVal = validateExtraction(moneyTpl, baseText, EMPTY_RANGES, {
       fields: {
         total_amount: {
@@ -209,6 +209,16 @@ describe('[I6] Rule A prime edge cases and decideCarry', () => {
     })[0]!;
     expect(
       classifyChange(baseSnap, gapVal, {
+        baselineParser: 'p1',
+        nextParser: 'p1',
+        baselineText: baseText,
+        nextText: baseText,
+        nextRanges: EMPTY_RANGES,
+        dateOrder: 'MDY',
+      }),
+    ).toEqual({ changeKind: 'changed', changeReason: 'GAP_INVOLVED' });
+    expect(
+      classifyChange(toBaseline(gapVal), gapVal, {
         baselineParser: 'p1',
         nextParser: 'p1',
         baselineText: baseText,
@@ -319,5 +329,102 @@ describe('[I6] Rule A prime edge cases and decideCarry', () => {
     expect(decideCarry(same, { id: 'rev-3', decision: 'revert' })).toBeNull();
     expect(decideCarry(same, null)).toBeNull();
     expect(decideCarry(changed, { id: 'rev-1', decision: 'approve' })).toBeNull();
+  });
+
+  it('[I6] handles mid-line POSSIBLE_AMENDMENT, multi-line EVIDENCE_HIDDEN, transitive v1->v2->v3 chains, and carried corrections', () => {
+    // 1. Mid-line token POSSIBLE_AMENDMENT: "The initial term shall be twenty-four (24) months"
+    const numTpl: ExtractionTemplateSpec = {
+      documentType: 'lease',
+      defaultCurrency: 'USD',
+      dateOrder: 'MDY',
+      fields: [{ fieldKey: 'term_months', fieldType: 'number', position: 1, label: 'Term' }],
+    };
+    const v1Lease = 'The initial term shall be twenty-four (24) months';
+    const v2Lease =
+      'The initial term shall be twenty-four (24) months\nAmendment: The initial term shall be thirty-six (36) months';
+    const baseTerm = validateExtraction(numTpl, v1Lease, EMPTY_RANGES, {
+      fields: {
+        term_months: {
+          found: true,
+          value: '24',
+          rawValue: '24',
+          quote: v1Lease,
+          line: 1,
+          notFoundReason: null,
+        },
+      },
+      documentFlags: { suspiciousInstructions: false, spans: [] },
+    })[0]!;
+    const nextTerm = validateExtraction(numTpl, v2Lease, EMPTY_RANGES, {
+      fields: {
+        term_months: {
+          found: true,
+          value: '24',
+          rawValue: '24',
+          quote: v1Lease,
+          line: 1,
+          notFoundReason: null,
+        },
+      },
+      documentFlags: { suspiciousInstructions: false, spans: [] },
+    })[0]!;
+    expect(
+      classifyChange(toBaseline(baseTerm), nextTerm, {
+        baselineParser: 'p1',
+        nextParser: 'p1',
+        baselineText: v1Lease,
+        nextText: v2Lease,
+        nextRanges: EMPTY_RANGES,
+        dateOrder: 'MDY',
+      }),
+    ).toEqual({ changeKind: 'changed', changeReason: 'POSSIBLE_AMENDMENT' });
+
+    // 2. Multi-line baseline canonicalEvidence hidden in v2 -> EVIDENCE_HIDDEN (priority 5, not EVIDENCE_CHANGED)
+    const v1Split = 'Amount payable under\nSection 4: $100.00';
+    const v2Split = 'Amount payable under\nSection 4: $100.00\nGrand Total: $100.00';
+    const v2Ranges: TextRanges = {
+      hidden: [[0, v1Split.length, 'OFF_PAGE']],
+      lowVisibility: [],
+    };
+    const splitBase = validateSingle(v1Split, v1Split, '100');
+    const splitNext = validateSingle(v2Split, 'Grand Total: $100.00', '100', v2Ranges);
+    expect(
+      classifyChange(toBaseline(splitBase), splitNext, {
+        baselineParser: 'p1',
+        nextParser: 'p1',
+        baselineText: v1Split,
+        nextText: v2Split,
+        nextRanges: v2Ranges,
+        dateOrder: 'MDY',
+      }),
+    ).toEqual({ changeKind: 'changed', changeReason: 'EVIDENCE_HIDDEN' });
+
+    // 3. Transitive v1 -> v2 -> v3 chain with carried correction (comparing original extracted values)
+    const docText = 'Total Due: $100.00';
+    const v1Val = validateSingle(docText, docText, '100');
+    const v2Val = validateSingle(docText, docText, '100');
+    const v3Val = validateSingle(docText, docText, '100');
+
+    const cls12 = classifyChange(toBaseline(v1Val), v2Val, {
+      baselineParser: 'p1',
+      nextParser: 'p1',
+      baselineText: docText,
+      nextText: docText,
+      nextRanges: EMPTY_RANGES,
+      dateOrder: 'MDY',
+    });
+    const carriedToV2 = decideCarry(cls12, { id: 'rev-v1-correct', decision: 'correct' });
+    expect(carriedToV2).toBe('rev-v1-correct');
+
+    const cls23 = classifyChange(toBaseline(v2Val), v3Val, {
+      baselineParser: 'p1',
+      nextParser: 'p1',
+      baselineText: docText,
+      nextText: docText,
+      nextRanges: EMPTY_RANGES,
+      dateOrder: 'MDY',
+    });
+    const carriedToV3 = decideCarry(cls23, { id: 'rev-v2-carried-correct', decision: 'correct' });
+    expect(carriedToV3).toBe('rev-v2-carried-correct');
   });
 });

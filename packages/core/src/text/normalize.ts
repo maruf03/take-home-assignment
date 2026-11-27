@@ -88,7 +88,7 @@ export function normSpanToOrigSpan(
   normStart: number,
   normEnd: number,
 ): { start: number; end: number } {
-  if (index.norm.length === 0 || normStart >= normEnd) {
+  if (index.norm.length === 0 || normEnd <= 0 || normStart >= normEnd) {
     return { start: 0, end: 0 };
   }
   const safeStart = Math.max(0, Math.min(normStart, index.norm.length - 1));

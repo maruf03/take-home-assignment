@@ -3,10 +3,12 @@ import path from 'node:path';
 import type { TextRanges } from '@app/contracts/dto';
 import { describe, expect, it } from 'vitest';
 import {
+  extractDateTokens,
   extractMoneyTokens,
   extractNumberTokens,
   extractPercentTokens,
   mergeChunkResults,
+  parseSpelledNumber,
   parseToolOutput,
   validateExtraction,
   type ExtractionTemplateSpec,
@@ -68,17 +70,30 @@ describe('[R6] evidence.tokenizers: money, percent, number, and date rules (§5.
     ).toEqual(['3.5', '2']);
   });
 
-  it('enforces strict money tokenizer rules (rejects dates/quantities/SD-400/unsupported/conflicting currencies; handles parens)', () => {
+  it('enforces strict money tokenizer rules (rejects dates/quantities/SD-400/unsupported/conflicting/suffixed currencies; handles parens, $-, and layout spaces)', () => {
     expect(extractMoneyTokens('Issue Date: 2025-09-14 qty 4 model SD-400')).toEqual([]);
+    expect(extractMoneyTokens('2025-09-14 USD')).toEqual([]);
     expect(extractMoneyTokens('$5,230.29 CAD')).toEqual([]);
     expect(extractMoneyTokens('CAD $5,230.29')).toEqual([]);
+    expect(extractMoneyTokens('CAD -$1,234.00')).toEqual([]);
+    expect(extractMoneyTokens('CAD ($1,234.00)')).toEqual([]);
+    expect(extractMoneyTokens('CAD  $5,230.29')).toEqual([]);
     expect(extractMoneyTokens('EUR 10 USD')).toEqual([]);
+    expect(extractMoneyTokens('$1.5M and $100k and $100% and $1,2345')).toEqual([]);
 
     expect(extractMoneyTokens('PAY $5,230.29 DUE NET 30').map((t) => t.value)).toEqual([
       { amount: '5230.29', currency: 'USD' },
     ]);
     expect(extractMoneyTokens('USD 5,230.29').map((t) => t.value)).toEqual([
       { amount: '5230.29', currency: 'USD' },
+    ]);
+    expect(extractMoneyTokens('$  5,230.29 and 5,230.29  USD').map((t) => t.value)).toEqual([
+      { amount: '5230.29', currency: 'USD' },
+      { amount: '5230.29', currency: 'USD' },
+    ]);
+    expect(extractMoneyTokens('$-1,234.00 and USD -1,234.00').map((t) => t.value)).toEqual([
+      { amount: '-1234', currency: 'USD' },
+      { amount: '-1234', currency: 'USD' },
     ]);
     expect(
       extractMoneyTokens('(1,234.00) USD and (1,234.00 USD) and ($1,234.00)').map((t) => t.value),
@@ -95,14 +110,36 @@ describe('[R6] evidence.tokenizers: money, percent, number, and date rules (§5.
     ]);
   });
 
-  it('handles twenty-four (24) as single token without TOKEN_AMBIGUOUS and rejects mismatched spelled/digit pairs', () => {
-    const tokens = extractNumberTokens(
-      '2. TERM. The initial term of this Lease shall be twenty-four (24)',
-    );
-    expect(tokens.map((t) => t.value)).toEqual(['24']);
+  it('enforces English number grammar (twenty-four (24), no phantom sums on "one and two" / "twenty thirty") and date formats', () => {
+    expect(
+      extractNumberTokens('2. TERM. The initial term of this Lease shall be twenty-four (24)').map(
+        (t) => t.value,
+      ),
+    ).toEqual(['24']);
+    expect(extractNumberTokens('The term shall be twenty-four (12) months')).toEqual([]);
 
-    const mismatched = extractNumberTokens('The term shall be twenty-four (12) months');
-    expect(mismatched).toEqual([]);
+    expect(extractNumberTokens('between one and two-bedroom units').map((t) => t.value)).toEqual([
+      '1',
+      '2',
+    ]);
+    expect(extractNumberTokens('twenty thirty').map((t) => t.value)).toEqual(['20', '30']);
+    expect(parseSpelledNumber('one and two')).toBeNull();
+    expect(parseSpelledNumber('one hundred hundred')).toBeNull();
+    expect(parseSpelledNumber('five thousand thousand')).toBeNull();
+    expect(parseSpelledNumber('one hundred twenty-three thousand four hundred fifty-six')).toBe(
+      123456,
+    );
+
+    expect(extractDateTokens('03/04/2025', 'DMY')).toMatchObject([
+      { value: '2025-04-03', ambiguousDate: true },
+    ]);
+    expect(extractDateTokens('03/03/2025', 'MDY')).toMatchObject([
+      { value: '2025-03-03', ambiguousDate: false },
+    ]);
+    expect(
+      extractDateTokens('15 March 2025 and 2025/09/14 and 14-09-2025', 'DMY').map((t) => t.value),
+    ).toEqual(['2025-03-15', '2025-09-14', '2025-09-14']);
+    expect(extractDateTokens('2025-02-29 and 03/04/25', 'MDY')).toEqual([]);
   });
 });
 
@@ -407,5 +444,231 @@ describe('[R6] evidence.validate: lease & market fixtures, gap codes, flags, and
     expect(byKey.get('agree')).toMatchObject({ kind: 'value', evidenceStart: 0, chunkIndex: 1 });
     expect(byKey.get('disagree')).toMatchObject({ kind: 'gap', gapCode: 'CONFLICTING_EVIDENCE' });
     expect(byKey.get('all_gaps')).toMatchObject({ kind: 'gap', gapCode: 'VALUE_NOT_SUPPORTED' });
+
+    // Verify EVIDENCE_HIDDEN beats VALUE_NOT_SUPPORTED in chunk merge priority
+    const hiddenChunk = validateExtraction(
+      {
+        documentType: 'invoice',
+        defaultCurrency: 'USD',
+        dateOrder: 'MDY',
+        fields: [{ fieldKey: 'amt', fieldType: 'money', position: 1, label: 'Amount' }],
+      },
+      'Secret: $100.00',
+      { hidden: [[0, 15, 'OFF_PAGE']], lowVisibility: [] },
+      {
+        fields: {
+          amt: {
+            found: true,
+            value: { amount: '100', currency: 'USD' },
+            rawValue: '$100.00',
+            quote: 'Secret: $100.00',
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      },
+      { chunkIndex: 0 },
+    );
+    const unsupChunk = validateExtraction(
+      {
+        documentType: 'invoice',
+        defaultCurrency: 'USD',
+        dateOrder: 'MDY',
+        fields: [{ fieldKey: 'amt', fieldType: 'money', position: 1, label: 'Amount' }],
+      },
+      'Visible: $200.00',
+      EMPTY_RANGES,
+      {
+        fields: {
+          amt: {
+            found: true,
+            value: { amount: '999', currency: 'USD' },
+            rawValue: '$999.00',
+            quote: 'Visible: $200.00',
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      },
+      { chunkIndex: 1 },
+    );
+    const mergedHidden = mergeChunkResults(
+      {
+        documentType: 'invoice',
+        defaultCurrency: 'USD',
+        dateOrder: 'MDY',
+        fields: [{ fieldKey: 'amt', fieldType: 'money', position: 1, label: 'Amount' }],
+      },
+      [unsupChunk, hiddenChunk],
+    );
+    expect(mergedHidden[0]).toMatchObject({ kind: 'gap', gapCode: 'EVIDENCE_HIDDEN' });
+  });
+
+  it('rejects substring quote truncation/sign-stripping/guard-bypasses, flags AMBIGUOUS_OCCURRENCE/TOKEN_AMBIGUOUS/mid-line CONFLICTING_LINES, and handles split multi-line quotes', () => {
+    const moneyTpl: ExtractionTemplateSpec = {
+      documentType: 'invoice',
+      defaultCurrency: 'USD',
+      dateOrder: 'MDY',
+      fields: [{ fieldKey: 'amt', fieldType: 'money', position: 1, label: 'Amount' }],
+    };
+    const dateTpl: ExtractionTemplateSpec = {
+      documentType: 'invoice',
+      defaultCurrency: 'USD',
+      dateOrder: 'MDY',
+      fields: [{ fieldKey: 'dt', fieldType: 'date', position: 1, label: 'Date' }],
+    };
+    const numTpl: ExtractionTemplateSpec = {
+      documentType: 'invoice',
+      defaultCurrency: 'USD',
+      dateOrder: 'MDY',
+      fields: [{ fieldKey: 'n', fieldType: 'number', position: 1, label: 'Number' }],
+    };
+
+    // 1. Substring truncation: "$1,234" inside "Total: $1,234.56" -> VALUE_NOT_SUPPORTED
+    expect(
+      validateExtraction(moneyTpl, 'Total: $1,234.56', EMPTY_RANGES, {
+        fields: {
+          amt: {
+            found: true,
+            value: { amount: '1234', currency: 'USD' },
+            rawValue: '$1,234',
+            quote: '$1,234',
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      })[0],
+    ).toMatchObject({ kind: 'gap', gapCode: 'VALUE_NOT_SUPPORTED' });
+
+    // 2. Date substring: "2/14/2025" inside "Due Date: 12/14/2025" -> VALUE_NOT_SUPPORTED
+    expect(
+      validateExtraction(dateTpl, 'Due Date: 12/14/2025', EMPTY_RANGES, {
+        fields: {
+          dt: {
+            found: true,
+            value: '2025-02-14',
+            rawValue: '2/14/2025',
+            quote: '2/14/2025',
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      })[0],
+    ).toMatchObject({ kind: 'gap', gapCode: 'VALUE_NOT_SUPPORTED' });
+
+    // 3. Sign stripping: "$1,234.56" inside "Adjustment: ($1,234.56)" -> VALUE_NOT_SUPPORTED
+    expect(
+      validateExtraction(moneyTpl, 'Adjustment: ($1,234.56)', EMPTY_RANGES, {
+        fields: {
+          amt: {
+            found: true,
+            value: { amount: '1234.56', currency: 'USD' },
+            rawValue: '$1,234.56',
+            quote: '$1,234.56',
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      })[0],
+    ).toMatchObject({ kind: 'gap', gapCode: 'VALUE_NOT_SUPPORTED' });
+
+    // 4. Disagreement / model-code / ordinal bypass via substring quote -> VALUE_NOT_SUPPORTED
+    expect(
+      validateExtraction(numTpl, 'Term: twenty-four (12) months', EMPTY_RANGES, {
+        fields: {
+          n: {
+            found: true,
+            value: '24',
+            rawValue: '24',
+            quote: 'twenty-four',
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      })[0],
+    ).toMatchObject({ kind: 'gap', gapCode: 'VALUE_NOT_SUPPORTED' });
+
+    expect(
+      validateExtraction(numTpl, 'Model SD-400\n2. TERM.', EMPTY_RANGES, {
+        fields: {
+          n: {
+            found: true,
+            value: '400',
+            rawValue: '400',
+            quote: '400',
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      })[0],
+    ).toMatchObject({ kind: 'gap', gapCode: 'VALUE_NOT_SUPPORTED' });
+
+    // 5. Empty quote -> EVIDENCE_NOT_IN_TEXT
+    expect(
+      validateExtraction(moneyTpl, 'Total: $100.00', EMPTY_RANGES, {
+        fields: {
+          amt: {
+            found: true,
+            value: { amount: '100', currency: 'USD' },
+            rawValue: '$100',
+            quote: null,
+            line: 1,
+            notFoundReason: null,
+          },
+        },
+        documentFlags: { suspiciousInstructions: false, spans: [] },
+      })[0],
+    ).toMatchObject({ kind: 'gap', gapCode: 'EVIDENCE_NOT_IN_TEXT' });
+
+    // 6. AMBIGUOUS_OCCURRENCE, TOKEN_AMBIGUOUS, mid-line CONFLICTING_LINES, and split multi-line quote
+    const multiText = [
+      'Monthly rent of $2,350.00 per month (late fee $75.00)',
+      'Monthly rent of $2,500.00 per month (late fee $75.00)',
+      'Monthly rent of $2,350.00 per month (late fee $75.00)',
+    ].join('\n');
+    const res = validateExtraction(moneyTpl, multiText, EMPTY_RANGES, {
+      fields: {
+        amt: {
+          found: true,
+          value: { amount: '2350', currency: 'USD' },
+          rawValue: '$2,350.00',
+          quote: 'Monthly rent of $2,350.00 per month (late fee $75.00)',
+          line: 1,
+          notFoundReason: null,
+        },
+      },
+      documentFlags: { suspiciousInstructions: false, spans: [] },
+    })[0]!;
+    expect(res.kind).toBe('value');
+    expect(res.flags).toContain('AMBIGUOUS_OCCURRENCE');
+    expect(res.flags).toContain('TOKEN_AMBIGUOUS');
+    expect(res.flags).toContain('CONFLICTING_LINES');
+
+    // Split multi-line quote with L###| prefixes
+    const splitText = 'Tenant shall pay monthly rent of\n$2,350.00 due on the first.';
+    const splitRes = validateExtraction(moneyTpl, splitText, EMPTY_RANGES, {
+      fields: {
+        amt: {
+          found: true,
+          value: { amount: '2350', currency: 'USD' },
+          rawValue: '$2,350.00',
+          quote: 'L001| Tenant shall pay monthly rent of\nL002| $2,350.00 due on the first.',
+          line: 1,
+          notFoundReason: null,
+        },
+      },
+      documentFlags: { suspiciousInstructions: false, spans: [] },
+    })[0]!;
+    expect(splitRes.kind).toBe('value');
+    expect(splitRes.canonicalEvidence).toBe(
+      'Tenant shall pay monthly rent of $2,350.00 due on the first.',
+    );
   });
 });

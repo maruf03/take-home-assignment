@@ -4,6 +4,7 @@ import type { ExtractionTemplateSpec, ParsedFieldCandidate, ParsedToolOutput } f
 
 export const MAX_QUOTE_LENGTH = 2000;
 export const MAX_DOCUMENT_FLAG_SPANS = 5;
+export const MAX_TEXT_SNIPPET_LENGTH = 500;
 
 function formatHintForFieldType(fieldType: FieldType): string {
   switch (fieldType) {
@@ -31,7 +32,8 @@ export function buildToolSchema(template: ExtractionTemplateSpec): Record<string
   const fieldSchemas: Record<string, Record<string, unknown>> = {};
   const requiredFieldKeys: string[] = [];
 
-  for (const field of template.fields) {
+  const sortedFields = [...template.fields].sort((a, b) => a.position - b.position);
+  for (const field of sortedFields) {
     requiredFieldKeys.push(field.fieldKey);
     const quoteDesc =
       'Complete line(s) copied character-for-character without the L###| prefix; empty string if not found';
@@ -145,7 +147,8 @@ export function parseToolOutput(
   template: ExtractionTemplateSpec,
 ): ParseToolOutputResult {
   const fieldShape: Record<string, z.ZodTypeAny> = {};
-  for (const field of template.fields) {
+  const sortedFields = [...template.fields].sort((a, b) => a.position - b.position);
+  for (const field of sortedFields) {
     fieldShape[field.fieldKey] =
       field.fieldType === 'money' ? moneyFieldEnvelopeSchema : scalarFieldEnvelopeSchema;
   }
@@ -176,12 +179,14 @@ export function parseToolOutput(
 
   const fieldsOut: Record<string, ParsedFieldCandidate> = {};
 
-  for (const field of template.fields) {
+  for (const field of sortedFields) {
     const rawEntry = parsed.data.fields[field.fieldKey] as Record<string, unknown>;
     const found = Boolean(rawEntry['found']);
     const quoteRaw = String(rawEntry['quote'] ?? '');
     const lineRaw = Number(rawEntry['line'] ?? -1);
-    const reasonRaw = String(rawEntry['not_found_reason'] ?? '').trim();
+    const reasonRaw = String(rawEntry['not_found_reason'] ?? '')
+      .trim()
+      .slice(0, MAX_TEXT_SNIPPET_LENGTH);
 
     if (!found) {
       fieldsOut[field.fieldKey] = {
@@ -230,7 +235,7 @@ export function parseToolOutput(
       documentFlags: {
         suspiciousInstructions: parsed.data.document_flags.suspicious_instructions,
         spans: parsed.data.document_flags.spans
-          .map((s) => s.trim())
+          .map((s) => s.trim().slice(0, MAX_TEXT_SNIPPET_LENGTH))
           .filter((s) => s.length > 0)
           .slice(0, MAX_DOCUMENT_FLAG_SPANS),
       },
