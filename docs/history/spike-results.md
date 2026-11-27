@@ -1,7 +1,10 @@
 # Core Task 0: live verification results (2026-11-27)
 
-These are evidence from real runs. The probes are `scripts/spikes/live-gemini.ts`; the Docker and
-SeaweedFS probes ran from scratch directories, and their commands are summarised below.
+These are evidence from real runs. The probes ran from throwaway scratch directories and are not
+kept in the repo; the production Gemini adapter and its tests (Core Task 6) supersede them.
+**To reproduce:** call `ai.models.generateContent` with `responseMimeType:'application/json'`,
+`responseJsonSchema` (the §5.3 sentinel schema), `thinkingConfig:{thinkingBudget:0}` and `temperature:0`
+on the `pdftotext -layout` text of a fixture. For the 429, fire about 25 parallel tiny calls.
 
 ## Step 1: Gemini (free-tier key, `@google/genai` 3.6.1)
 
