@@ -332,7 +332,8 @@ Partial **UNIQUE (version_id) WHERE status='running'**.
 | reused_from_call_id uuid NULL FK → llm_calls | a reused call costs 0 and is not billed |
 | provider, model, prompt_version text | |
 | request jsonb | system + user + tool schema. **Headers are never stored.** |
-| provider_request_id text NULL | e.g. Anthropic `request-id` response header |
+| provider_request_id text NULL | Anthropic `request-id` header / Gemini `responseId` |
+| served_model text NULL | the provider-reported model (Gemini `modelVersion`); never used in hashes, cassette paths or pricing keys (§15.5) |
 | raw_response jsonb NULL · stop_reason text NULL · schema_valid bool NULL | |
 | input_tokens, output_tokens int NULL · usage jsonb NULL · cost_usd numeric(12,6) default 0 · latency_ms int NULL | |
 | error_code, error_message text NULL · started_at · finished_at NULL | |
@@ -737,7 +738,7 @@ interface LlmProvider { name: string; capabilities: LlmCapabilities;
    span**. If no visible occurrence passes → `VALUE_NOT_SUPPORTED`.
    | Type | Token rule |
    |---|---|
-   | money | Tokenizer (verified in Node on the fixtures and edge cases): `(?<![\w.])(?<neg>-)?(?<open>\()?(?:(?<pre>USD\|EUR\|GBP)\s?)?(?<sym>[$€£])?\s?(?<num>\d{1,3}(?:,\d{3})+\|\d+)(?:\.(?<frac>\d+))?(?:\s?(?<post>USD\|EUR\|GBP\|CAD\|AUD\|NZD\|HKD\|SGD\|MXN\|JPY\|CHF\|CNY\|INR)\b)?(?:(?<close>\))(?:\s?(?<post2>…same codes…)\b)?)?`, then validated in code:<br>1. **At least one currency marker** is required, otherwise the token isn't money. That rejects dates, quantities and `SD-400`.<br>2. Only **ISO codes** are matched (supported: USD/EUR/GBP; known unsupported: CAD, AUD, NZD, HKD, SGD, MXN, JPY, CHF, CNY, INR → token rejected). Words like `PAY`, `TAX`, `FEE`, `DUE`, `NET` and `ALL` are never treated as currency.<br>3. All markers must agree: `EUR 10 USD` → rejected.<br>4. Negative means a leading `-`, or a **paired** `(` … `)`. A `)` without a matching `(` is ignored, so it's just prose: `(up to $2,540)` → +2540. `(1,234.00) USD`, `(1,234.00 USD)` and `($1,234.00)` are all negative.<br>Results: `PAY $5,230.29` / `$5,230.29 DUE` / `$5,230.29 NET 30` → 5230.29 USD; `$5,230.29 CAD` → rejected; `Sales Tax (8.625%): $415.29` → 415.29 only. Compare canonically. |
+   | money | Tokenizer (verified in Node on the fixtures and edge cases): `(?<![\w.])(?<neg>-)?(?<open>\()?(?:(?<pre>USD\|EUR\|GBP\|CAD\|AUD\|NZD\|HKD\|SGD\|MXN\|JPY\|CHF\|CNY\|INR)\s?)?(?<sym>[$€£])?\s?(?<num>\d{1,3}(?:,\d{3})+\|\d+)(?:\.(?<frac>\d+))?(?:\s?(?<post>USD\|EUR\|GBP\|CAD\|AUD\|NZD\|HKD\|SGD\|MXN\|JPY\|CHF\|CNY\|INR)\b)?(?:(?<close>\))(?:\s?(?<post2>…same codes…)\b)?)?`, then validated in code:<br>1. **At least one currency marker** is required, otherwise the token isn't money. That rejects dates, quantities and `SD-400`.<br>2. Only **ISO codes** are matched (supported: USD/EUR/GBP; known unsupported: CAD, AUD, NZD, HKD, SGD, MXN, JPY, CHF, CNY, INR → token rejected). Words like `PAY`, `TAX`, `FEE`, `DUE`, `NET` and `ALL` are never treated as currency.<br>3. All markers must agree: `EUR 10 USD` → rejected.<br>4. Negative means a leading `-`, or a **paired** `(` … `)`. A `)` without a matching `(` is ignored, so it's just prose: `(up to $2,540)` → +2540. `(1,234.00) USD`, `(1,234.00 USD)` and `($1,234.00)` are all negative.<br>Results: `PAY $5,230.29` / `$5,230.29 DUE` / `$5,230.29 NET 30` → 5230.29 USD; `$5,230.29 CAD` and `CAD $5,230.29` → rejected; `Sales Tax (8.625%): $415.29` → 415.29 only. Compare canonically. |
    | date | ISO, `Month D, YYYY`, `Mon D, YYYY`, `D Month YYYY`, `NN/NN/YYYY`, `NN-NN-YYYY`. A numeric date is ambiguous unless one part is above 12; otherwise use the template `date_order` and add `AMBIGUOUS_DATE`. Two-digit years are rejected. Calendar validity is checked. |
    | number | Digits, canonical. Spelled-out numbers 0–999,999 via a small grammar. Forms like "twenty-four (24)" must agree, or the check fails. |
    | percent | `-?\d+(?:\.\d+)?\s*(?:%|(?:percent|per cent)\b)` (the old `%\b` matched nothing: `%` is not a word character). A bare number is not accepted. Verified against the market report: `4.2%`, `4.9%`, `3.8%`, `5%`. |
@@ -1068,7 +1069,7 @@ README).
 | HTTP | **The SPA's CSP and security headers come from nginx** (`apps/web`), which serves the HTML: `default-src 'self'; worker-src 'self' blob:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'`, plus `Referrer-Policy: no-referrer` and `nosniff`. Helmet on the API sets API-appropriate headers (`default-src 'none'`, `frame-ancestors 'none'`). Same origin through nginx, so CORS is off. `trust proxy` limited to the fixed compose `edge` subnet (nginx), so a direct `127.0.0.1:3000` caller can't spoof `X-Forwarded-For`; throttling keys on the socket address otherwise. An in-memory `@nestjs/throttler` (uploads 10/min/IP, reviews 120/min, reads 600/min; `compose.e2e.yaml` raises them for Playwright), so it doesn't depend on Redis. nginx `limit_req`/`limit_conn` and `client_max_body_size 11m`. Unknown routes → 404 problem. |
 | Inputs | Filenames sanitized and encoded per RFC 6266/5987. S3 keys are hash-only. Cursors are size-capped. Only parameterized SQL. There's no user-supplied URL anywhere, so there's no SSRF surface. |
 | Secrets | The LLM key (`GEMINI_API_KEY`, default provider, or `ANTHROPIC_API_KEY`) is **in the worker env only**: the API config schema has no LLM key, the parse children get `env:{}`, and stored requests carry no headers. pino redaction. A test greps the e2e logs for the key. |
-| DB privileges | `packages/db/assets/grants.sql` (idempotent, run after migrations as `migrator`). Matrix for the `app` role (used by api and worker):<br/>• `document_types`, `extraction_templates`, `template_fields`: SELECT<br/>• `documents`, `document_versions`, `extraction_runs`: SELECT, INSERT, UPDATE<br/>• `llm_calls`: SELECT, INSERT, plus column UPDATE on `(raw_response, provider_request_id, stop_reason, schema_valid, input_tokens, output_tokens, usage, cost_usd, latency_ms, error_code, error_message, finished_at)`<br/>• `extracted_values`: SELECT, INSERT, plus column UPDATE on `(current_review_id)`<br/>• `reviews`: **SELECT, INSERT only**<br/>• `idempotency_keys` *(Extended E1b; the grant is added with its migration, and Core's grants.sql omits it)*: SELECT, INSERT, UPDATE, DELETE<br/>• the `drizzle` migrations schema: none<br/>Other roles: `migrator` owns the schema and runs DDL; `maintainer` is created NOLOGIN for the future purge job. A privilege snapshot test compares `role_table_grants` and `column_privileges` to committed JSON. Negative tests: `app` UPDATE on `reviews` and DELETE on `documents` → permission denied. |
+| DB privileges | `packages/db/assets/grants.sql` (idempotent, run after migrations as `migrator`). Matrix for the `app` role (used by api and worker):<br/>• `document_types`, `extraction_templates`, `template_fields`: SELECT<br/>• `documents`, `document_versions`, `extraction_runs`: SELECT, INSERT, UPDATE<br/>• `llm_calls`: SELECT, INSERT, plus column UPDATE on `(raw_response, provider_request_id, served_model, stop_reason, schema_valid, input_tokens, output_tokens, usage, cost_usd, latency_ms, error_code, error_message, finished_at)`<br/>• `extracted_values`: SELECT, INSERT, plus column UPDATE on `(current_review_id)`<br/>• `reviews`: **SELECT, INSERT only**<br/>• `idempotency_keys` *(Extended E1b; the grant is added with its migration, and Core's grants.sql omits it)*: SELECT, INSERT, UPDATE, DELETE<br/>• the `drizzle` migrations schema: none<br/>Other roles: `migrator` owns the schema and runs DDL; `maintainer` is created NOLOGIN for the future purge job. A privilege snapshot test compares `role_table_grants` and `column_privileges` to committed JSON. Negative tests: `app` UPDATE on `reviews` and DELETE on `documents` → permission denied. |
 | Dev defaults | Compose `${VAR:-dev-…}` defaults make `up` work without `.env`. The config schema holds a denylist of those values: refuse to boot under `APP_ENV=production`, warn once otherwise. The SeaweedFS `s3.json` dev identity is committed and labelled dev-only. Fake and cassette LLM providers are refused unless `APP_ENV=test`. |
 | Infrastructure | The compose `backend` network is `internal:true` (postgres, redis, s3, migrate, api, worker). `edge` is a **normal bridge**, because Docker can't publish host ports from a container attached only to internal networks. It has a fixed subnet for `trust proxy`, and connects web ↔ api with ports bound to 127.0.0.1. The worker reaches the LLM via `egress`. Restricting api and web egress on `edge` is a production concern, handled by security groups in Terraform. Only `web` is published, plus `api` on `127.0.0.1:3000` for evaluator curl. The worker also joins an `egress` network. Containers run non-root, `read_only` with tmpfs, `cap_drop: [ALL]`, `no-new-privileges`, `pids_limit`, `mem_limit`, with pinned base digests. Redis has `requirepass`. Postgres has an `app` role (DML) and a `migrator` role (DDL). SeaweedFS uses an identities config. |
 | Supply chain | `--frozen-lockfile`, `pnpm audit --prod --audit-level high`, a pnpm 12 `allowBuilds` allowlist (install scripts blocked by default), Renovate config, an SBOM in CI, and SHA-pinned actions. |
@@ -1698,41 +1699,6 @@ The items moved from Core in §15.3 come first, as plan tasks E1a–E1d. Then, i
 - **E10** The quarantine-policy automation (Core still runs `retries: 1` and reports flaky tests).
 - **E11** **Live deployment** of the Core stack (ECS Fargate or similar). Lowest priority: local `docker compose up` is the supported evaluation path (owner decision, 2026-11-27).
 
----
-
-## 16. v5 changelog: adversarial review fixes
-
-| Review item | Fix (section) |
-|---|---|
-| P0-1 `vendor_name` flagged as a weak line | `string` fields never weak (§5.5) |
-| P0-2 percent regex `%\b` | New regex, verified on fixtures (§5.5) |
-| P0-3 money regex accepts bare numbers | Currency marker required; balanced parentheses (§5.5) |
-| P0-4 A′ labels unreviewed changed values `same` | Classify (Step A) decoupled from carry (Step B) (§5.6) |
-| P0-5 retry collides on `UNIQUE(version_id, attempt)` | `run_seq` / `run_number` monotonic; `attempts` = budget (§3, §4.5, §4.6) |
-| P0-6 `provider_request_id` grant; call-cap precedence | Grant added; cap = `COUNT(*)` of billed attempts, `max(6, chunks+3)` (§4.7, §8) |
-| P0-7 review delta read before the lock | Doc `FOR NO KEY UPDATE` → value `FOR UPDATE` → exact delta ∈ {−1,0,+1} (§3) |
-| P0-8 transient lease not released; `enqueued_at` NULL; restore leaves attempts and errors | Fenced transient release; NULL = eligible; restore and retry reset (§3, §4.5, §6) |
-| P0-9 iframe sandbox breaks browser PDF viewers | pdf.js canvas in a Web Worker (E7, §14) |
-| C1 Docker entry and migrate assets | `dist/src/main.js`; migrate CLI and SQL ship in `@app/db` (§10.4) |
-| C2 attempted quote on gaps | `attempted_quote` column plus `gap.attemptedQuote` (§4.8, §7.4) |
-| C3 text pane data | `textRanges`, `pageOffsets`, `otherOccurrences` (§7.4) |
-| C4 web needs typed-value helpers | Moved to `contracts` (§10) |
-| C5 "Needs review (n)" vs no totals | Capped `GET /documents/facets` (§7.5, §14.1) |
-| C6 prompt said null | Sentinel wording (§5.3) |
-| C7 `.withResponse()` in cassettes | `.asResponse()` (§11.3) |
-| C8 immutable `/text` cache | `no-cache` plus strong ETag (§7.5, §14.6) |
-| 10 manifest IDs | `?externalId=` lookup documented (§7.2) |
-| 11 title > 200 chars | Truncate on a grapheme boundary (§4.4) |
-| 12 dedupe returns failed or stale-template version | Dedupe only against a non-failed version on the current template (§3) |
-| 13 claim lock order; multipart idempotency hash | Version locked first; canonical request hash (§3, §4.11) |
-| 14 call cap vs chunks | `max(6, plannedChunks+3)` (§4.7, §5.3) |
-| 15 `CONFLICTING_LINES` undefined, chunk tie-break, `uiCopy` collision, ordinal noise | Defined; earliest offset wins; namespaced keys; ordinals excluded (§5.4, §5.5, §14.3) |
-| 16 `trace-check` ran too early | Final fan-in job; matrix tests never affected-filtered (§10.7, §11.2) |
-| 17 nginx read-only, `edge` egress, `inject-workspace-packages`, e2e throttling, `trust proxy` | Sized tmpfs plus nginx temp paths; `edge` internal; inject only in the Docker deploy; e2e override; subnet-scoped `trust proxy` (§8, §10) |
-| 18 risky deferred spikes | Core Task 0 live checks; operator-list detection moved to Extended (§15) |
-| 19 `updated_at` JS clock, trash keyset, `Location` header, retryable map, revert "own action" claim | SQL `now()`; `(deleted_at, id)` keyset; `Location` removed; retryable table; honest wording (§4.0, §7, E4) |
-| Strategy: scope vs deadline | Tiers (§15); live deploy is the last Extended item (owner: local is enough) |
-
 ### 15.3 Owner decisions after review round 2 (2026-11-27) — OVERRIDE §15.1/§15.2 where they conflict
 1. **Moved Core → Extended** (each listed as a deliberate cut if not reached):
    - Soft delete, restore, Trash tab, 410 on nested routes, `(deleted_at, id)` cursor, route-leak test.
@@ -1779,6 +1745,67 @@ and the installed `@google/genai` SDK:
 - **Prompt caching:** none relied on for Gemini. The prompts are small, and implicit caching is opportunistic.
 - **Anthropic adapter:** stays implemented, unit-tested against the local mock server (Core Task 6), and documented as the production recommendation (strict tools, zero-retention options).
 
+### 15.5 Task 0 verified facts (2026-11-27; evidence in `docs/history/spike-results.md`). These OVERRIDE §15.4 assumptions
+- **Model:** default `LLM_MODEL=gemini-3.5-flash`. `gemini-2.5-flash` is unavailable to new keys, and 3.7/3.8-flash returned persistent 503s. Store the response's `modelVersion` (it was served as `gemini-3.6-flash`).
+- **Structured output:** `responseMimeType:'application/json'` plus **`responseJsonSchema`**. `additionalProperties:false` is accepted, so `capabilities.constrainedSchema = true`.
+- **Thinking:** `thinkingConfig:{thinkingBudget:0}` (accepted on 3.5-flash, no thought tokens). Never send `thinkingLevel:'MINIMAL'`, which returns 400 on some models.
+- **Request id:** `provider_request_id = response.responseId`. There is no request-id header. Raw JSON is captured through a `fetch` wrapper in the client's `httpOptions`.
+- **429 classification** comes from `error.details[]`:
+  - `QuotaFailure.violations[].quotaId` containing `PerMinute` → transient, with `retryAfterMs` from `RetryInfo.retryDelay` (e.g. `"39s"`).
+  - `PerDay`, or a quota with no `RetryInfo` → `LLM_RATE_CAPPED`.
+  - A 39s delay is above the 20s in-run threshold, so it becomes a transient release plus a BullMQ delayed retry.
+- **503 `UNAVAILABLE`** ("high demand") is transient and common on newer models, so it goes through backoff and the breaker.
+- **Limiter:** the free tier is **5 RPM per model**, so the default is `LLM_LIMIT_MAX=1, LLM_LIMIT_DURATION_MS=12000`.
+- **Validator normalisation** (in `contracts` `parseTypedValue`):
+  - currency `$`/`€`/`£` → `USD`/`EUR`/`GBP`
+  - percent values may carry a trailing `%`
+  - quotes may carry layout padding, which whitespace normalisation absorbs
+- **Docker:** pnpm 12 + turbo prune + `pnpm deploy` is verified on Node 24, read-only, non-root. Set `SCARF_ANALYTICS=false` and don't list `@scarf/scarf` in `allowBuilds`.
+- **SeaweedFS:** healthcheck `wget -q -O /dev/null http://127.0.0.1:8333/healthz`. A repeated CreateBucket returns `BucketAlreadyOwnedByYou`, which counts as success.
+- **Requested vs served model:** `request_sha256`, cassette filenames, the reuse lookup and pricing all key on the **requested** model (`LLM_MODEL`, e.g. `gemini-3.5-flash`). The provider's `modelVersion` (e.g. `gemini-3.6-flash`) goes into a new column, `llm_calls.served_model text NULL`, and is **never** fed back into hashes, cassette paths or pricing. The pricing table falls back from served to requested.
+- **Test and e2e limiter:** with `LLM_PROVIDER ∈ {fake, fake-ipc, cassette}`, the BullMQ limiter defaults to `{max: 100, duration: 1000}`. The free-tier `{1, 12000}` applies only to real providers. `compose.e2e.yaml` sets the fast values explicitly.
+- **`parseTypedValue('money')` hardening:**
+  - strip a leading currency symbol and thousand separators from `amount` (`"$1,985"` → `"1985"`)
+  - map a `currency` of `$`/`€`/`£` to ISO
+  - when `found:true` and `currency:""`, fall back to the template `default_currency`
+  - `supportedBy` still requires the quote's own currency marker
+- **Host toolchain:** the repo pins **Node 24 and pnpm 12.23.0 in `mise.toml`**, plus `.nvmrc` for non-mise users. Local scripts run on Node 24 (no `tsx` workaround), and `engines` stays strict.
+
+---
+
+## 16. v5 changelog: adversarial review fixes
+
+| Review item | Fix (section) |
+|---|---|
+| P0-1 `vendor_name` flagged as a weak line | `string` fields never weak (§5.5) |
+| P0-2 percent regex `%\b` | New regex, verified on fixtures (§5.5) |
+| P0-3 money regex accepts bare numbers | Currency marker required; balanced parentheses (§5.5) |
+| P0-4 A′ labels unreviewed changed values `same` | Classify (Step A) decoupled from carry (Step B) (§5.6) |
+| P0-5 retry collides on `UNIQUE(version_id, attempt)` | `run_seq` / `run_number` monotonic; `attempts` = budget (§3, §4.5, §4.6) |
+| P0-6 `provider_request_id` grant; call-cap precedence | Grant added; cap = `COUNT(*)` of billed attempts, `max(6, chunks+3)` (§4.7, §8) |
+| P0-7 review delta read before the lock | Doc `FOR NO KEY UPDATE` → value `FOR UPDATE` → exact delta ∈ {−1,0,+1} (§3) |
+| P0-8 transient lease not released; `enqueued_at` NULL; restore leaves attempts and errors | Fenced transient release; NULL = eligible; restore and retry reset (§3, §4.5, §6) |
+| P0-9 iframe sandbox breaks browser PDF viewers | pdf.js canvas in a Web Worker (E7, §14) |
+| C1 Docker entry and migrate assets | `dist/src/main.js`; migrate CLI and SQL ship in `@app/db` (§10.4) |
+| C2 attempted quote on gaps | `attempted_quote` column plus `gap.attemptedQuote` (§4.8, §7.4) |
+| C3 text pane data | `textRanges`, `pageOffsets`, `otherOccurrences` (§7.4) |
+| C4 web needs typed-value helpers | Moved to `contracts` (§10) |
+| C5 "Needs review (n)" vs no totals | Capped `GET /documents/facets` (§7.5, §14.1) |
+| C6 prompt said null | Sentinel wording (§5.3) |
+| C7 `.withResponse()` in cassettes | `.asResponse()` (§11.3) |
+| C8 immutable `/text` cache | `no-cache` plus strong ETag (§7.5, §14.6) |
+| 10 manifest IDs | `?externalId=` lookup documented (§7.2) |
+| 11 title > 200 chars | Truncate on a grapheme boundary (§4.4) |
+| 12 dedupe returns failed or stale-template version | Dedupe only against a non-failed version on the current template (§3) |
+| 13 claim lock order; multipart idempotency hash | Version locked first; canonical request hash (§3, §4.11) |
+| 14 call cap vs chunks | `max(6, plannedChunks+3)` (§4.7, §5.3) |
+| 15 `CONFLICTING_LINES` undefined, chunk tie-break, `uiCopy` collision, ordinal noise | Defined; earliest offset wins; namespaced keys; ordinals excluded (§5.4, §5.5, §14.3) |
+| 16 `trace-check` ran too early | Final fan-in job; matrix tests never affected-filtered (§10.7, §11.2) |
+| 17 nginx read-only, `edge` egress, `inject-workspace-packages`, e2e throttling, `trust proxy` | Sized tmpfs plus nginx temp paths; `edge` internal; inject only in the Docker deploy; e2e override; subnet-scoped `trust proxy` (§8, §10) |
+| 18 risky deferred spikes | Core Task 0 live checks; operator-list detection moved to Extended (§15) |
+| 19 `updated_at` JS clock, trash keyset, `Location` header, retryable map, revert "own action" claim | SQL `now()`; `(deleted_at, id)` keyset; `Location` removed; retryable table; honest wording (§4.0, §7, E4) |
+| Strategy: scope vs deadline | Tiers (§15); live deploy is the last Extended item (owner: local is enough) |
+
 ### 16.1 Round-2 review fixes
 | Item | Fix |
 |---|---|
@@ -1809,21 +1836,11 @@ and the installed `@google/genai` SDK:
 | compose-smoke FLUSHALL was a no-op | Retry → FLUSHALL → restart → expect `run_number = 2` (§10.7, Task 13) |
 | Anthropic-only env in §8, §10.5, §11.5 and cassette paths | `LLM_PROVIDER` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`; `cassettes/<provider>/…` |
 
-### 15.5 Task 0 verified facts (2026-11-27; evidence in `docs/history/spike-results.md`). These OVERRIDE §15.4 assumptions
-- **Model:** default `LLM_MODEL=gemini-3.5-flash`. `gemini-2.5-flash` is unavailable to new keys, and 3.7/3.8-flash returned persistent 503s. Store the response's `modelVersion` (it was served as `gemini-3.6-flash`).
-- **Structured output:** `responseMimeType:'application/json'` plus **`responseJsonSchema`**. `additionalProperties:false` is accepted, so `capabilities.constrainedSchema = true`.
-- **Thinking:** `thinkingConfig:{thinkingBudget:0}` (accepted on 3.5-flash, no thought tokens). Never send `thinkingLevel:'MINIMAL'`, which returns 400 on some models.
-- **Request id:** `provider_request_id = response.responseId`. There is no request-id header. Raw JSON is captured through a `fetch` wrapper in the client's `httpOptions`.
-- **429 classification** comes from `error.details[]`:
-  - `QuotaFailure.violations[].quotaId` containing `PerMinute` → transient, with `retryAfterMs` from `RetryInfo.retryDelay` (e.g. `"39s"`).
-  - `PerDay`, or a quota with no `RetryInfo` → `LLM_RATE_CAPPED`.
-  - A 39s delay is above the 20s in-run threshold, so it becomes a transient release plus a BullMQ delayed retry.
-- **503 `UNAVAILABLE`** ("high demand") is transient and common on newer models, so it goes through backoff and the breaker.
-- **Limiter:** the free tier is **5 RPM per model**, so the default is `LLM_LIMIT_MAX=1, LLM_LIMIT_DURATION_MS=12000`.
-- **Validator normalisation** (in `contracts` `parseTypedValue`):
-  - currency `$`/`€`/`£` → `USD`/`EUR`/`GBP`
-  - percent values may carry a trailing `%`
-  - quotes may carry layout padding, which whitespace normalisation absorbs
-- **Docker:** pnpm 12 + turbo prune + `pnpm deploy` is verified on Node 24, read-only, non-root. Set `SCARF_ANALYTICS=false` and don't list `@scarf/scarf` in `allowBuilds`.
-- **SeaweedFS:** healthcheck `wget -q -O /dev/null http://127.0.0.1:8333/healthz`. A repeated CreateBucket returns `BucketAlreadyOwnedByYou`, which counts as success.
-- **Local scripts:** host Node is 22 and lacks type stripping, so repo TypeScript scripts run with **`tsx`**, a root devDependency.
+### 16.3 Round-4 review fixes
+| Item | Fix |
+|---|---|
+| Host Node 22 vs `engines >=24` | `mise.toml` pins Node 24 and pnpm 12.23.0 (§15.5) |
+| `modelVersion` aliasing | Hash, cassette and pricing key on the requested model; `served_model` column (§4.7, §15.5) |
+| A 12s limiter would stall test suites | Fast limiter for fake and cassette providers (§15.5) |
+| `CAD $…` was accepted; Gemini's `$` and `%` noise | `pre` uses the full ISO list; money parsing hardened (§5.5, §15.5) |
+| commitlint scope-enum; Task 0 checkboxes; §15.5 order | Scope optional; Task 0 ticked; §16 moved to the end |
