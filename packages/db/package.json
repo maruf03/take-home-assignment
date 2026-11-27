@@ -23,15 +23,16 @@
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests test/unit",
-    "test:int": "vitest run test/schema",
+    "test:int": "vitest run test/schema test/repos",
     "test:chaos": "vitest run --passWithNoTests test/chaos",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "db:migrate": "echo 'Migrate CLI is added in Core Task 3b' && exit 1",
-    "db:seed": "echo 'Seed CLI is added in Core Task 3b' && exit 1",
+    "db:migrate": "node dist/cli/migrate-and-seed.js --migrate-only",
+    "db:seed": "node dist/cli/migrate-and-seed.js",
     "db:check": "drizzle-kit check --config drizzle.config.ts && drizzle-kit generate --config drizzle.config.ts && env -u GIT_DIR -u GIT_WORK_TREE git diff --exit-code -- drizzle && test -z \"$(env -u GIT_DIR -u GIT_WORK_TREE git ls-files --others --exclude-standard -- drizzle)\""
   },
   "dependencies": {
     "@app/contracts": "workspace:*",
+    "@aws-sdk/client-s3": "^3.1178.0",
     "drizzle-orm": "^0.45.4",
     "pg": "^8.23.1"
   },
