@@ -54,7 +54,7 @@ export const workerConfigSchema = z
       .string()
       .trim()
       .min(1)
-      .default(() => `${os.hostname()}-${process.pid}`),
+      .default(() => os.hostname()),
     LEASE_SECONDS: z.coerce.number().int().min(1).max(300).default(30),
     HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(10_000),
     SWEEP_INTERVAL_MS: z.coerce.number().int().min(100).max(300_000).default(10_000),

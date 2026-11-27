@@ -1,7 +1,7 @@
 import { createDb, createPool, type AppDatabase } from '@app/db';
 import { S3BlobStore, type BlobStore } from '@app/storage';
 import { BullModule, getQueueToken } from '@nestjs/bullmq';
-import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
+import { Inject, Logger, Module, type OnApplicationShutdown } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { LlmCircuitBreaker } from './circuit-breaker.js';
@@ -106,6 +106,8 @@ class WorkerInfraModule implements OnApplicationShutdown {
         Reflect.defineMetadata(
           BULLMQ_WORKER_METADATA,
           {
+            // Consumption starts from SweepService after boot release (spec §6).
+            autorun: false,
             concurrency: config.WORKER_CONCURRENCY,
             limiter: resolveWorkerLimiter(config),
             settings: {
@@ -162,18 +164,35 @@ class WorkerInfraModule implements OnApplicationShutdown {
     },
     {
       provide: SweepService,
-      inject: [WORKER_DB, getQueueToken(EXTRACTION_QUEUE), WorkerMetricsService, WORKER_CONFIG],
+      inject: [
+        WORKER_DB,
+        getQueueToken(EXTRACTION_QUEUE),
+        WorkerMetricsService,
+        WORKER_CONFIG,
+        ExtractionProcessor,
+      ],
       useFactory: (
         dbHandle: WorkerDbHandle,
         queue: Queue<ExtractionJobData>,
         metrics: WorkerMetricsService,
         config: WorkerConfig,
+        processor: ExtractionProcessor,
       ) =>
         new SweepService(dbHandle.db, queue, metrics, {
           workerId: config.WORKER_ID,
           intervalMs: config.SWEEP_INTERVAL_MS,
           cooldownSeconds: config.SWEEP_COOLDOWN_SECONDS,
           maxAttempts: config.MAX_ATTEMPTS,
+          startConsuming: () => {
+            const bullWorker = processor.worker;
+            if (!bullWorker.isRunning()) {
+              void bullWorker.run().catch((err: unknown) => {
+                new Logger('WorkerModule').error(
+                  `BullMQ worker run failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
+            }
+          },
         }),
     },
     ExtractionProcessor,

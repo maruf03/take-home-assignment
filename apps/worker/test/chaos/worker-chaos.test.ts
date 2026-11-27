@@ -303,7 +303,7 @@ describe('Worker chaos tests: detached SIGKILL + redis-chaos FLUSHALL (Task 8)',
     });
 
     try {
-      const worker1 = spawnWorker({ workerId: 'chaos-w1', fakeIpcEndpoint: ipc.url });
+      const worker1 = spawnWorker({ workerId: 'chaos-w', fakeIpcEndpoint: ipc.url });
       await llmStarted;
 
       // Confirm C2 request row exists with raw_response IS NULL (before C2 completion)
@@ -322,7 +322,7 @@ describe('Worker chaos tests: detached SIGKILL + redis-chaos FLUSHALL (Task 8)',
       await redisChaos.flushall();
 
       // Spawn fresh worker -> lease expires (2s) -> sweep abandons run1 & re-enqueues -> run2 extracts
-      const worker2 = spawnWorker({ workerId: 'chaos-w2', fakeIpcEndpoint: ipc.url });
+      const worker2 = spawnWorker({ workerId: 'chaos-w', fakeIpcEndpoint: ipc.url });
       await eventually(
         async () => {
           const v = await getVersionById(ctx.appDb, version.id);
@@ -365,7 +365,7 @@ describe('Worker chaos tests: detached SIGKILL + redis-chaos FLUSHALL (Task 8)',
     let docBarrier: Awaited<ReturnType<typeof acquireRowLockBarrier>> | undefined;
 
     try {
-      const worker1 = spawnWorker({ workerId: 'chaos-c2-w1', fakeIpcEndpoint: ipc.url });
+      const worker1 = spawnWorker({ workerId: 'chaos-c2-w', fakeIpcEndpoint: ipc.url });
       await llmStarted;
       docBarrier = await acquireRowLockBarrier(
         ctx.migratorPool,
@@ -396,7 +396,7 @@ describe('Worker chaos tests: detached SIGKILL + redis-chaos FLUSHALL (Task 8)',
       await redisChaos.flushall();
 
       // Spawn fresh worker -> sweep recovers -> reuses C2 -> 1 billed call total!
-      const worker2 = spawnWorker({ workerId: 'chaos-c2-w2', fakeIpcEndpoint: ipc.url });
+      const worker2 = spawnWorker({ workerId: 'chaos-c2-w', fakeIpcEndpoint: ipc.url });
       await eventually(
         async () => {
           const v = await getVersionById(ctx.appDb, version.id);

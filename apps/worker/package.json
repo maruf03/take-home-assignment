@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "test": "vitest run test/unit --passWithNoTests",
     "test:int": "vitest run --passWithNoTests test/int",
-    "test:chaos": "vitest run --passWithNoTests test/chaos",
+    "test:chaos": "pnpm run build && vitest run --passWithNoTests test/chaos",
     "dev": "swc src -d dist/src --strip-leading-paths && node --watch dist/src/main.js"
   },
   "dependencies": {

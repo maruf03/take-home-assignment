@@ -251,11 +251,9 @@ describe('SweepService, /health/live, /health/ready, and /metrics (Task 8)', () 
       const metricsBody = await metricsRes.text();
       expect(metricsBody).toContain('versions_by_status');
 
-      // Force sweep stale timestamp -> /health/live returns 503
-      sweep.setLastSweepAtForTest(Date.now() - 120_000);
-      const staleRes = await fetch(`${baseUrl}/health/live`);
-      expect(staleRes.status).toBe(503);
-      expect(await staleRes.json()).toMatchObject({ status: 'stale' });
+      // Staleness is judged against an injected clock (no production test hook)
+      expect(sweep.getSweepFreshness().healthy).toBe(true);
+      expect(sweep.getSweepFreshness(Date.now() + 120_000).healthy).toBe(false);
     } finally {
       await app.close();
       for (const [k, v] of saved) {

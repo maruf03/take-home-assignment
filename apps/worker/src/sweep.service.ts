@@ -21,7 +21,8 @@ export interface SweepServiceOptions {
   readonly cooldownSeconds?: number;
   readonly maxAttempts?: number;
   readonly batchLimit?: number;
-  readonly staleThresholdMs?: number;
+  /** Invoked once after boot release succeeds; starts BullMQ consumption (autorun:false). */
+  readonly startConsuming?: () => void | Promise<void>;
 }
 
 export interface SweepTickSummary {
@@ -61,6 +62,8 @@ export class SweepService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly maxAttempts: number;
   private readonly batchLimit: number;
   private readonly staleThresholdMs: number;
+  private readonly startConsuming: (() => void | Promise<void>) | undefined;
+  private bootDone = false;
 
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -78,10 +81,9 @@ export class SweepService implements OnApplicationBootstrap, OnModuleDestroy {
     this.cooldownSeconds = Math.max(1, Math.trunc(options.cooldownSeconds ?? 10));
     this.maxAttempts = Math.max(1, Math.trunc(options.maxAttempts ?? 5));
     this.batchLimit = Math.max(1, Math.trunc(options.batchLimit ?? 500));
-    this.staleThresholdMs = Math.max(
-      this.intervalMs * 3,
-      Math.trunc(options.staleThresholdMs ?? 30_000),
-    );
+    // Spec F2: live requires a completed sweep tick within 3 x SWEEP_INTERVAL_MS.
+    this.staleThresholdMs = this.intervalMs * 3;
+    this.startConsuming = options.startConsuming;
   }
 
   onApplicationBootstrap(): void {
@@ -126,10 +128,6 @@ export class SweepService implements OnApplicationBootstrap, OnModuleDestroy {
     };
   }
 
-  setLastSweepAtForTest(timestampMs: number | null): void {
-    this.lastSweepAt = timestampMs;
-  }
-
   async tick(options: { isBoot?: boolean } = {}): Promise<SweepTickSummary> {
     if (this.stopped || this.running) {
       return {
@@ -146,10 +144,16 @@ export class SweepService implements OnApplicationBootstrap, OnModuleDestroy {
     this.running = true;
     try {
       let bootReleased = 0;
-      if (options.isBoot) {
+      // Boot release runs on the first successful tick (retried until the DB is reachable).
+      // BullMQ consumption starts only afterwards, so a freshly claimed run is never released.
+      if (options.isBoot || !this.bootDone) {
         const released = await withTx(this.db, (tx) => sweepBootRelease(tx, this.workerId));
         bootReleased = released.length;
         this.metrics.incSweepRequeued('boot', bootReleased);
+        if (!this.bootDone) {
+          this.bootDone = true;
+          await this.startConsuming?.();
+        }
       }
 
       // Steps 2, 3, 4a, and 6 run under a transaction-scoped Postgres advisory leader lock
@@ -209,15 +213,23 @@ export class SweepService implements OnApplicationBootstrap, OnModuleDestroy {
         if (this.stopped) {
           break;
         }
-        const existing = await this.queue.getJob(candidate.versionId);
-        if (existing) {
-          const state = await existing.getState();
-          if (LIVE_JOB_STATES.has(state)) {
-            continue;
+        try {
+          const existing = await this.queue.getJob(candidate.versionId);
+          if (existing) {
+            const state = await existing.getState();
+            if (LIVE_JOB_STATES.has(state)) {
+              continue;
+            }
+            // Completed or failed leftover job with same jobId -> remove() so addBulk can enqueue fresh
+            await existing.remove();
+            removedFinishedJobs += 1;
           }
-          // Completed or failed leftover job with same jobId -> remove() so addBulk can enqueue fresh
-          await existing.remove();
-          removedFinishedJobs += 1;
+        } catch (err) {
+          // One bad candidate must not starve the rest; it is retried after the cooldown.
+          this.logger.error(
+            `Sweep candidate ${candidate.versionId} skipped: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          continue;
         }
 
         toEnqueue.push({
