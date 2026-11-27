@@ -50,3 +50,6 @@ Thumbs.db
 
 # --- never commit (brief rule): coding-agent session logs ----------------------
 *.jsonl
+
+# superpowers execution workspaces (ledgers, briefs, review packages)
+.superpowers/

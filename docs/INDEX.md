@@ -24,6 +24,7 @@ agents start with [AGENTS.md](../AGENTS.md).
 | [Plan: Core tier](superpowers/plans/2026-11-27-core-tier.md) | ✅ |
 | [Plan: Extended tier](superpowers/plans/2026-11-27-extended-tier.md) | ✅ |
 | [history/](history/): PLAN-v0…v4, the debate trail behind the spec | ✅ (frozen) |
+| [history/spike-results.md](history/spike-results.md): Task 0 live verification evidence (Gemini, Docker, SeaweedFS) | ✅ |
 
 ## Explanation (why it works this way)
 | Doc | Status |

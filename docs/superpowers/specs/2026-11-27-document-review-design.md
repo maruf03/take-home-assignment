@@ -1509,14 +1509,14 @@ Spike code is kept in the scratchpad (`drizzle-spike`, `spike-uuidv7`, `spike-ti
 `spike-anthropic`, `spike-esm-nest`) for reference when scaffolding.
 
 ### 13.2 Still to verify at scaffold
-1. A live forced `tool_choice` with `strict: true` against `claude-sonnet-5-5` (first cassette recording), and that caching actually triggers (`cache_read_input_tokens > 0`) given the 512-token minimum.
+1. ~~Live provider call~~ **Done for Gemini (§15.5).** A live Anthropic strict call remains unverified (no key); it's covered by the mock-server tests only.
 2. (Extended #4 only) Correlating `getOperatorList` `setTextRenderingMode` to text items in pdfjs (needs a crafted golden PDF).
 3. BullMQ custom `jobId` without `:`.
 4. Stryker `vitest-runner` in the pnpm 12 workspace.
-5. SeaweedFS healthcheck endpoint, whether `wget` is in the image, and the S3 checksum settings.
+5. ~~SeaweedFS healthcheck and checksum settings~~ **Done (§15.5).**
 6. AWS Emulator glibc requirement on `ubuntu-24.04`.
 7. `zod/mini` compatibility with the shared contracts; react-router 7 data mode with `ensureQueryData` loaders.
-8. The `pnpm deploy` layout inside the `turbo prune`d Docker image on Node 24 (the spike ran on Node 22 locally, and the tinypool spike ran Node 24 in Docker).
+8. ~~`pnpm deploy` layout on Node 24~~ **Done (§15.5).**
 9. Nest ESM circular-import behaviour with `forwardRef`, if a module cycle ever appears (`import/no-cycle` should prevent it).
 
 ## 14. Frontend and UX
@@ -1808,3 +1808,22 @@ and the installed `@google/genai` SDK:
 | `trace-check` gated Extended sub-tests | Sub-tests tagged Extended in traceability.md, and §11.2 re-synced from it |
 | compose-smoke FLUSHALL was a no-op | Retry → FLUSHALL → restart → expect `run_number = 2` (§10.7, Task 13) |
 | Anthropic-only env in §8, §10.5, §11.5 and cassette paths | `LLM_PROVIDER` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`; `cassettes/<provider>/…` |
+
+### 15.5 Task 0 verified facts (2026-11-27; evidence in `docs/history/spike-results.md`). These OVERRIDE §15.4 assumptions
+- **Model:** default `LLM_MODEL=gemini-3.5-flash`. `gemini-2.5-flash` is unavailable to new keys, and 3.7/3.8-flash returned persistent 503s. Store the response's `modelVersion` (it was served as `gemini-3.6-flash`).
+- **Structured output:** `responseMimeType:'application/json'` plus **`responseJsonSchema`**. `additionalProperties:false` is accepted, so `capabilities.constrainedSchema = true`.
+- **Thinking:** `thinkingConfig:{thinkingBudget:0}` (accepted on 3.5-flash, no thought tokens). Never send `thinkingLevel:'MINIMAL'`, which returns 400 on some models.
+- **Request id:** `provider_request_id = response.responseId`. There is no request-id header. Raw JSON is captured through a `fetch` wrapper in the client's `httpOptions`.
+- **429 classification** comes from `error.details[]`:
+  - `QuotaFailure.violations[].quotaId` containing `PerMinute` → transient, with `retryAfterMs` from `RetryInfo.retryDelay` (e.g. `"39s"`).
+  - `PerDay`, or a quota with no `RetryInfo` → `LLM_RATE_CAPPED`.
+  - A 39s delay is above the 20s in-run threshold, so it becomes a transient release plus a BullMQ delayed retry.
+- **503 `UNAVAILABLE`** ("high demand") is transient and common on newer models, so it goes through backoff and the breaker.
+- **Limiter:** the free tier is **5 RPM per model**, so the default is `LLM_LIMIT_MAX=1, LLM_LIMIT_DURATION_MS=12000`.
+- **Validator normalisation** (in `contracts` `parseTypedValue`):
+  - currency `$`/`€`/`£` → `USD`/`EUR`/`GBP`
+  - percent values may carry a trailing `%`
+  - quotes may carry layout padding, which whitespace normalisation absorbs
+- **Docker:** pnpm 12 + turbo prune + `pnpm deploy` is verified on Node 24, read-only, non-root. Set `SCARF_ANALYTICS=false` and don't list `@scarf/scarf` in `allowBuilds`.
+- **SeaweedFS:** healthcheck `wget -q -O /dev/null http://127.0.0.1:8333/healthz`. A repeated CreateBucket returns `BucketAlreadyOwnedByYou`, which counts as success.
+- **Local scripts:** host Node is 22 and lacks type stripping, so repo TypeScript scripts run with **`tsx`**, a root devDependency.
