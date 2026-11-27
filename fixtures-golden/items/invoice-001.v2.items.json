@@ -1,0 +1,958 @@
+[
+  {
+    "pageNumber": 1,
+    "view": [
+      0,
+      0,
+      612,
+      792
+    ],
+    "items": [
+      {
+        "str": "MERIDIAN OFFICE SUPPLIES LLC",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          753.57
+        ],
+        "width": 168,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "482 Commerce Way, Suite 210",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          739.39
+        ],
+        "width": 162,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Eastport, CA 94702",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          725.22
+        ],
+        "width": 108,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "INVOICE (REVISED)",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          696.87
+        ],
+        "width": 102,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Invoice Number: INV-2025-0847",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          668.53
+        ],
+        "width": 174,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Issue",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          654.35
+        ],
+        "width": 30,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          61.18,
+          654.35
+        ],
+        "width": 6.000000000000007,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "Date: 2025-09-14",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          67.18,
+          654.35
+        ],
+        "width": 96,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Due Date: 2025-11-13",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          640.18
+        ],
+        "width": 120,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Payment Terms: Net 60",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          626.01
+        ],
+        "width": 126,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Bill To:",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          597.66
+        ],
+        "width": 48,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Lomi Labs Inc.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          583.49
+        ],
+        "width": 84,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "900 Mission Street, Floor 5",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          569.31
+        ],
+        "width": 162,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "San Francisco, CA 94103",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          555.14
+        ],
+        "width": 138,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Description",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          526.8
+        ],
+        "width": 66,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          97.18,
+          526.8
+        ],
+        "width": 180,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "Qty",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          277.18,
+          526.8
+        ],
+        "width": 18,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          295.18,
+          526.8
+        ],
+        "width": 30,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "Unit Price",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          325.18,
+          526.8
+        ],
+        "width": 60,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          385.18,
+          526.8
+        ],
+        "width": 36,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "Amount",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          421.18,
+          526.8
+        ],
+        "width": 36,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "----------------------------------------------------------------------",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          512.62
+        ],
+        "width": 420,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Standing desk, model SD-400",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          498.45
+        ],
+        "width": 162,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          193.18,
+          498.45
+        ],
+        "width": 90,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "4",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          283.18,
+          498.45
+        ],
+        "width": 6,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          289.18,
+          498.45
+        ],
+        "width": 48,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$589.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          337.18,
+          498.45
+        ],
+        "width": 42,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          379.18,
+          498.45
+        ],
+        "width": 24,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$2,356.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          403.18,
+          498.45
+        ],
+        "width": 54,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Ergonomic chair, model EC-220",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          484.28
+        ],
+        "width": 174,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          205.18,
+          484.28
+        ],
+        "width": 78,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "6",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          283.18,
+          484.28
+        ],
+        "width": 6,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          289.18,
+          484.28
+        ],
+        "width": 48,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$412.50",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          337.18,
+          484.28
+        ],
+        "width": 42,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          379.18,
+          484.28
+        ],
+        "width": 24,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$2,475.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          403.18,
+          484.28
+        ],
+        "width": 54,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Monitor arm, dual, model MA-2",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          470.1
+        ],
+        "width": 174,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          205.18,
+          470.1
+        ],
+        "width": 78,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "6",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          283.18,
+          470.1
+        ],
+        "width": 6,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          289.18,
+          470.1
+        ],
+        "width": 54,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$89.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          343.18,
+          470.1
+        ],
+        "width": 36,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          379.18,
+          470.1
+        ],
+        "width": 36,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$534.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          415.18,
+          470.1
+        ],
+        "width": 42,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Delivery and assembly",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          455.93
+        ],
+        "width": 126,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          157.18,
+          455.93
+        ],
+        "width": 126,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "1",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          283.18,
+          455.93
+        ],
+        "width": 6,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          289.18,
+          455.93
+        ],
+        "width": 48,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$275.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          337.18,
+          455.93
+        ],
+        "width": 42,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          379.18,
+          455.93
+        ],
+        "width": 36,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$275.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          415.18,
+          455.93
+        ],
+        "width": 42,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "----------------------------------------------------------------------",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          441.76
+        ],
+        "width": 420,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Subtotal:",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          307.18,
+          427.58
+        ],
+        "width": 54,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          361.18,
+          427.58
+        ],
+        "width": 42,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$5,640.00",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          403.18,
+          427.58
+        ],
+        "width": 54,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Sales Tax (8.625%): $486.45",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          307.18,
+          413.41
+        ],
+        "width": 162,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Total Due:",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          307.18,
+          399.24
+        ],
+        "width": 60,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          367.18,
+          399.24
+        ],
+        "width": 36,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "$6,126.45",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          403.18,
+          399.24
+        ],
+        "width": 54,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "This revised invoice supersedes the version issued on 2025-09-14 and",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          370.89
+        ],
+        "width": 408,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "reflects two additional ergonomic chairs and updated payment terms.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          356.72
+        ],
+        "width": 402,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Please reference the invoice number on all payments.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          342.54
+        ],
+        "width": 312,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Payments by ACH to the account on file. A late fee of 1.5% per month",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          328.37
+        ],
+        "width": 408,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "applies to balances outstanding past the due date.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          314.2
+        ],
+        "width": 300,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      }
+    ]
+  }
+]

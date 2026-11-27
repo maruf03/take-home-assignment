@@ -1,0 +1,403 @@
+[
+  {
+    "pageNumber": 1,
+    "view": [
+      0,
+      0,
+      612,
+      792
+    ],
+    "items": [
+      {
+        "str": "EASTPORT RENTAL MARKET REPORT (EXCERPT)",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          753.57
+        ],
+        "width": 234,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Prepared by Shoreline Market Analytics",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          739.39
+        ],
+        "width": 228,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Reporting Period: Q3 2025",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          711.05
+        ],
+        "width": 150,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Market Area: Eastport-Harborview Submarket",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          696.87
+        ],
+        "width": 252,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "MARKET OVERVIEW",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          668.53
+        ],
+        "width": 90,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "The Eastport-Harborview Submarket continued to tighten through the",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          640.18
+        ],
+        "width": 396,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "third",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          626.01
+        ],
+        "width": 30,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          61.18,
+          626.01
+        ],
+        "width": 6.000000000000007,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "quarter. The overall vacancy rate declined to 4.2%, down from",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          67.18,
+          626.01
+        ],
+        "width": 366,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "4.9% in the prior quarter, driven by steady absorption of the two",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          611.83
+        ],
+        "width": 390,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "projects delivered in late 2024 and no new completions this quarter.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          597.66
+        ],
+        "width": 408,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Average asking rent for a one-bedroom unit reached $1,985 per month,",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          569.31
+        ],
+        "width": 408,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "a year-over-year increase of 3.8%. Two-bedroom units averaged $2,540",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          555.14
+        ],
+        "width": 408,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "per month over the same period. Concessions remain limited to",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          540.97
+        ],
+        "width": 366,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "select lease-ups, with most stabilized properties offering none.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          526.8
+        ],
+        "width": 384,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "SUPPLY",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          498.45
+        ],
+        "width": 36,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "No new units were delivered in Q3. One project of 96 units at",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          470.1
+        ],
+        "width": 366,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Dockside Commons remains under construction, with completion",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          455.93
+        ],
+        "width": 360,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "expected in Q2 2026. No additional projects have broken ground",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          441.76
+        ],
+        "width": 372,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "this year, suggesting constrained supply through at least 2027.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          427.58
+        ],
+        "width": 378,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "OUTLOOK",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          399.24
+        ],
+        "width": 42,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "Shoreline Market Analytics expects vacancy to remain below 5%",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          370.89
+        ],
+        "width": 366,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "through the next four quarters, with rent growth moderating toward",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          356.72
+        ],
+        "width": 396,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": true
+      },
+      {
+        "str": "3% as",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          31.18,
+          342.54
+        ],
+        "width": 30,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          61.18,
+          342.54
+        ],
+        "width": 6.000000000000007,
+        "height": 0,
+        "dir": "ltr",
+        "hasEOL": false
+      },
+      {
+        "str": "affordability pressure builds at the upper end of the market.",
+        "transform": [
+          10,
+          0,
+          0,
+          10,
+          67.18,
+          342.54
+        ],
+        "width": 366,
+        "height": 10,
+        "dir": "ltr",
+        "hasEOL": false
+      }
+    ]
+  }
+]

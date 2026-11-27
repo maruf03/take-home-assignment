@@ -1,0 +1,27 @@
+MERIDIAN OFFICE SUPPLIES LLC
+482 Commerce Way, Suite 210
+Eastport, CA 94702
+INVOICE (REVISED)
+Invoice Number: INV-2025-0847
+Issue Date: 2025-09-14
+Due Date: 2025-11-13
+Payment Terms: Net 60
+Bill To:
+Lomi Labs Inc.
+900 Mission Street, Floor 5
+San Francisco, CA 94103
+Description Qty Unit Price Amount
+----------------------------------------------------------------------
+Standing desk, model SD-400 4 $589.00 $2,356.00
+Ergonomic chair, model EC-220 6 $412.50 $2,475.00
+Monitor arm, dual, model MA-2 6 $89.00 $534.00
+Delivery and assembly 1 $275.00 $275.00
+----------------------------------------------------------------------
+Subtotal: $5,640.00
+Sales Tax (8.625%): $486.45
+Total Due: $6,126.45
+This revised invoice supersedes the version issued on 2025-09-14 and
+reflects two additional ergonomic chairs and updated payment terms.
+Please reference the invoice number on all payments.
+Payments by ACH to the account on file. A late fee of 1.5% per month
+applies to balances outstanding past the due date.
