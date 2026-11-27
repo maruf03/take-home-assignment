@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "swc src -d dist/src --strip-leading-paths",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run test/unit --passWithNoTests",
     "test:int": "vitest run --passWithNoTests test/int",
     "test:chaos": "vitest run --passWithNoTests test/chaos",
-    "dev": "echo 'Worker NestJS dev process is added in Core Task 7'"
+    "dev": "swc src -d dist/src --strip-leading-paths && node --watch dist/src/main.js"
   },
   "dependencies": {
     "@app/config": "workspace:*",
@@ -19,11 +19,22 @@
     "@app/db": "workspace:*",
     "@app/llm": "workspace:*",
     "@app/pdf": "workspace:*",
-    "@app/storage": "workspace:*"
+    "@app/storage": "workspace:*",
+    "@nestjs/bullmq": "^12.0.2",
+    "@nestjs/common": "^12.6.3",
+    "@nestjs/core": "^12.6.3",
+    "bullmq": "^6.7.10",
+    "ioredis": "^6.1.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@swc/cli": "^0.8.2",
+    "@swc/core": "^1.16.22",
     "@types/node": "^24.19.4",
     "typescript": "^5.9.3",
+    "unplugin-swc": "^2.0.0",
     "vitest": "^5.1.2"
   }
 }

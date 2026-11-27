@@ -13,6 +13,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { AppTransaction, DbTx } from '../client.js';
 import { documents, documentVersions, extractionRuns } from '../schema/documents.js';
 import { extractedValues, reviews } from '../schema/values.js';
+import type { DocumentRow, DocumentVersionRow } from './documents.js';
 import { touch } from './touch.js';
 
 export type ExtractedValueRow = typeof extractedValues.$inferSelect;
@@ -48,13 +49,25 @@ export interface FinalizeValueInput {
   carriedReview?: CarriedReviewInput | null;
 }
 
+export interface FinalizeBuildValuesContext {
+  tx: AppTransaction;
+  document: DocumentRow;
+  version: DocumentVersionRow;
+}
+
 export interface FinalizeRunInput {
   warnings: VersionWarning[];
   chunked: boolean;
   llmCallCount: number;
   reusedCallCount: number;
   costUsd: string;
-  values: FinalizeValueInput[];
+  values?: FinalizeValueInput[];
+  /**
+   * Optional callback invoked strictly AFTER `documents FOR UPDATE` and fenced
+   * `document_versions FOR UPDATE` are held, so carry-over baseline/review reads
+   * cannot race with concurrent finalizes or human reviews under READ COMMITTED.
+   */
+  buildValues?: (ctx: FinalizeBuildValuesContext) => Promise<FinalizeValueInput[]>;
 }
 
 export type FinalizeRunResult =
@@ -115,6 +128,12 @@ export async function finalizeRun(
     return { ok: false, reason: 'fenced' };
   }
 
+  // Resolve values (including baseline/carry-over reads) ONLY AFTER holding both
+  // documents FOR UPDATE and document_versions FOR UPDATE.
+  const values = input.buildValues
+    ? await input.buildValues({ tx, document: doc, version: ver })
+    : (input.values ?? []);
+
   // 4. Mark version extracted and clear lease (fenced).
   await tx
     .update(documentVersions)
@@ -144,11 +163,11 @@ export async function finalizeRun(
 
   // 6. Bulk insert extracted values idempotently.
   const insertedRows: ExtractedValueRow[] =
-    input.values.length > 0
+    values.length > 0
       ? await tx
           .insert(extractedValues)
           .values(
-            input.values.map((v) => ({
+            values.map((v) => ({
               versionId,
               runId,
               fieldKey: v.fieldKey,
@@ -181,7 +200,7 @@ export async function finalizeRun(
 
   // 7. Insert carried reviews for newly inserted values and link current_review_id.
   const inputByFieldKey = new Map<string, FinalizeValueInput>();
-  for (const item of input.values) {
+  for (const item of values) {
     inputByFieldKey.set(item.fieldKey, item);
   }
 
