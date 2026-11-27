@@ -1,0 +1,15 @@
+# Normalize text to LF in the repo; binary assets untouched.
+* text=auto eol=lf
+
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+
+# Generated files: collapse in diffs, exclude from language stats.
+pnpm-lock.yaml                 linguist-generated=true -diff
+packages/db/drizzle/**         linguist-generated=true
+docs/reference/openapi.json    linguist-generated=true
+fixtures-golden/**             linguist-generated=true
