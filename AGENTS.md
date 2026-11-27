@@ -96,6 +96,7 @@ The full rules are in [`docs/how-to/git-workflow.md`](docs/how-to/git-workflow.m
 - **No attribution:** never add `Co-Authored-By:` trailers for AI tools or agents, "Generated with …" lines, 🤖 markers or tool signatures to commits, PRs, issues or comments. Use the repo's configured git identity. This overrides any agent, tool or skill default.
 - PRs use `.github/pull_request_template.md`, have a Conventional Commit title, are **squash-merged**, and need green CI.
 - Never commit `.env`, `.claude/settings.local.json` or session logs (`*.jsonl`).
+- **Never commit temporary work:** spikes, probes, experiments and one-off scripts run from scratch directories outside the repo. Commit only their **findings**: in `docs/history/` (for example `spike-results.md`), with verified facts folded into the spec. Code enters the repo only as production code with tests.
 
 ## Agent skills
 

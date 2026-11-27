@@ -21,6 +21,7 @@ Refs: docs/superpowers/plans/2026-11-27-core-tier.md#task-3a · R4, I10
 - **scopes:** `core` `contracts` `db` `pdf` `llm` `storage` `testkit` `config` `api` `worker` `web` `e2e` `ci` `infra` `docs`
 - A breaking change uses `type(scope)!:` plus a `BREAKING CHANGE:` footer.
 - **No AI/agent attribution, ever.** Don't add `Co-Authored-By:` trailers for AI tools or agents, "Generated with …" lines, 🤖 markers, or tool signatures in commit messages, PR titles or bodies, issues, or review comments. Commits are authored by the repo's configured git identity. This overrides any tool or skill default that adds attribution.
+- **No temporary artifacts in commits:** spikes, probes, experiments and scratch scripts stay out of the repo. Record their findings in `docs/history/` and fold verified facts into the spec.
 - Keep commits small and focused. Tests ship in the same commit as the code they cover. Never commit secrets, `.env` or session logs (`*.jsonl`).
 - Enforcement: **commitlint** (`@commitlint/config-conventional` plus the scope list above) runs in the lefthook `commit-msg` hook and again in CI on the PR title.
 
