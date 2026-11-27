@@ -1,9 +1,10 @@
 import type { RunTrigger } from '@app/contracts/status';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Inject, Logger } from '@nestjs/common';
+import { Inject, Logger, Optional } from '@nestjs/common';
 import { Worker, type Job } from 'bullmq';
 import { LlmCircuitBreaker } from './circuit-breaker.js';
 import { ExtractionPipeline } from './extraction-pipeline.js';
+import { WorkerMetricsService } from './metrics.service.js';
 
 export const EXTRACTION_QUEUE = 'extraction';
 
@@ -53,6 +54,7 @@ export class ExtractionProcessor extends WorkerHost {
   constructor(
     @Inject(ExtractionPipeline) private readonly pipeline: ExtractionPipeline,
     @Inject(LlmCircuitBreaker) private readonly circuitBreaker: LlmCircuitBreaker,
+    @Optional() @Inject(WorkerMetricsService) private readonly metrics?: WorkerMetricsService,
   ) {
     super();
   }
@@ -78,6 +80,7 @@ export class ExtractionProcessor extends WorkerHost {
 
   private async applyRateLimit(durationMs: number): Promise<void> {
     const safeMs = Math.max(1, Math.trunc(durationMs));
+    this.metrics?.incRateLimited();
     const activeWorker = this.getActiveWorker();
     if (activeWorker) {
       await activeWorker.rateLimit(safeMs);
@@ -100,14 +103,23 @@ export class ExtractionProcessor extends WorkerHost {
     switch (outcome.status) {
       case 'succeeded':
         this.circuitBreaker.recordSuccess();
+        this.metrics?.incExtractionRun('succeeded');
         return;
 
       case 'noop_already_claimed':
+        return;
+
       case 'aborted_fence':
+        this.metrics?.incFencedWrite();
+        this.metrics?.incExtractionRun('aborted_fence');
+        return;
+
       case 'failed_permanent':
+        this.metrics?.incExtractionRun('failed_permanent', outcome.errorCode);
         return;
 
       case 'released_transient': {
+        this.metrics?.incExtractionRun('released_transient', outcome.errorCode);
         const breaker = this.circuitBreaker.recordTransientFailure();
         const pauseMs = Math.max(
           outcome.rateLimitMs ?? 0,

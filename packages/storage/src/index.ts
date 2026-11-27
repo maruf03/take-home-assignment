@@ -35,6 +35,7 @@ export interface BlobStore {
   getObject(key: string, signal?: AbortSignal): Promise<Buffer>;
   headObject(key: string): Promise<BlobHeadResult | null>;
   ensureBucket(): Promise<void>;
+  ping(): Promise<void>;
   close?(): void;
 }
 
@@ -210,6 +211,18 @@ export class S3BlobStore implements BlobStore {
     }
   }
 
+  async ping(): Promise<void> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } catch (err) {
+      throw new StorageError(
+        'STORAGE_UNAVAILABLE',
+        `S3 health check failed for bucket "${this.bucket}": ${err instanceof Error ? err.message : String(err)}`,
+        { transient: true, cause: err },
+      );
+    }
+  }
+
   close(): void {
     this.client.destroy();
   }
@@ -223,6 +236,12 @@ export class MemoryBlobStore implements BlobStore {
   failWith: StorageError | null = null;
 
   async ensureBucket(): Promise<void> {
+    if (this.failWith) {
+      throw this.failWith;
+    }
+  }
+
+  async ping(): Promise<void> {
     if (this.failWith) {
       throw this.failWith;
     }

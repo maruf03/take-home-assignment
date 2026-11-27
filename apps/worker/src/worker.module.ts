@@ -1,7 +1,8 @@
 import { createDb, createPool, type AppDatabase } from '@app/db';
 import { S3BlobStore, type BlobStore } from '@app/storage';
-import { BullModule } from '@nestjs/bullmq';
+import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
+import type { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { LlmCircuitBreaker } from './circuit-breaker.js';
 import {
@@ -15,13 +16,16 @@ import {
   EXTRACTION_QUEUE,
   extractionBackoffStrategy,
   ExtractionProcessor,
+  type ExtractionJobData,
 } from './extraction.processor.js';
+import { HealthController } from './http/health.controller.js';
+import { MetricsController } from './http/metrics.controller.js';
+import { WorkerMetricsService } from './metrics.service.js';
 import { ParsePoolService } from './parse-pool.provider.js';
+import { SweepService } from './sweep.service.js';
+import { WORKER_BLOB_STORE, WORKER_CONFIG, WORKER_DB, WORKER_REDIS } from './tokens.js';
 
-export const WORKER_CONFIG = Symbol('WORKER_CONFIG');
-export const WORKER_DB = Symbol('WORKER_DB');
-export const WORKER_REDIS = Symbol('WORKER_REDIS');
-export const WORKER_BLOB_STORE = Symbol('WORKER_BLOB_STORE');
+export { WORKER_BLOB_STORE, WORKER_CONFIG, WORKER_DB, WORKER_REDIS } from './tokens.js';
 
 const BULLMQ_WORKER_METADATA = 'bullmq:worker_metadata';
 
@@ -113,7 +117,7 @@ class WorkerInfraModule implements OnApplicationShutdown {
         return {
           connection,
           defaultJobOptions: {
-            attempts: 5,
+            attempts: config.MAX_ATTEMPTS,
             backoff: { type: 'custom' },
             removeOnComplete: 100,
             removeOnFail: 500,
@@ -125,8 +129,10 @@ class WorkerInfraModule implements OnApplicationShutdown {
       name: EXTRACTION_QUEUE,
     }),
   ],
+  controllers: [HealthController, MetricsController],
   providers: [
     ParsePoolService,
+    WorkerMetricsService,
     {
       provide: LlmCircuitBreaker,
       useFactory: () => new LlmCircuitBreaker(),
@@ -154,8 +160,30 @@ class WorkerInfraModule implements OnApplicationShutdown {
           },
         ),
     },
+    {
+      provide: SweepService,
+      inject: [WORKER_DB, getQueueToken(EXTRACTION_QUEUE), WorkerMetricsService, WORKER_CONFIG],
+      useFactory: (
+        dbHandle: WorkerDbHandle,
+        queue: Queue<ExtractionJobData>,
+        metrics: WorkerMetricsService,
+        config: WorkerConfig,
+      ) =>
+        new SweepService(dbHandle.db, queue, metrics, {
+          workerId: config.WORKER_ID,
+          intervalMs: config.SWEEP_INTERVAL_MS,
+          cooldownSeconds: config.SWEEP_COOLDOWN_SECONDS,
+          maxAttempts: config.MAX_ATTEMPTS,
+        }),
+    },
     ExtractionProcessor,
   ],
-  exports: [ExtractionPipeline, ExtractionProcessor, ParsePoolService],
+  exports: [
+    ExtractionPipeline,
+    ExtractionProcessor,
+    ParsePoolService,
+    SweepService,
+    WorkerMetricsService,
+  ],
 })
 export class WorkerModule {}

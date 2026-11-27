@@ -1,5 +1,5 @@
 import { PROBLEM_STATUS, type ProblemCode } from '@app/contracts/problems';
-import type { ExtractTablesWithRelations } from 'drizzle-orm';
+import { sql, type ExtractTablesWithRelations } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase, type NodePgQueryResultHKT } from 'drizzle-orm/node-postgres';
 import type { PgTransaction } from 'drizzle-orm/pg-core';
 import { Pool, type PoolConfig } from 'pg';
@@ -40,6 +40,10 @@ export function createPool(
 
 export function createDb(pool: Pool): AppDatabase {
   return drizzle(pool, { schema });
+}
+
+export async function pingDb(db: DbTx): Promise<void> {
+  await db.execute(sql`SELECT 1`);
 }
 
 /**

@@ -404,3 +404,46 @@ export async function listRuns(
 
   return toPage(rows, ks.limit, (row) => String(row.runNumber), fingerprint);
 }
+
+const SWEEP_ADVISORY_LOCK_KEY = 7_120_001;
+
+/**
+ * Acquires a non-blocking transaction-scoped Postgres advisory lock for multi-replica
+ * sweep leader election (spec §6). Returns `true` if this transaction holds leadership.
+ */
+export async function tryAdvisorySweepLock(tx: AppTransaction): Promise<boolean> {
+  const res = await tx.execute<{ locked: boolean }>(
+    sql`SELECT pg_try_advisory_xact_lock(${SWEEP_ADVISORY_LOCK_KEY}) AS locked`,
+  );
+  return res.rows[0]?.locked === true;
+}
+
+export interface VersionStatusCounts {
+  queued: number;
+  extracting: number;
+  extracted: number;
+  failed: number;
+}
+
+/**
+ * Counts document_versions grouped by status for the worker's `versions_by_status` gauge (spec §6, §9).
+ */
+export async function countVersionsByStatus(tx: DbTx): Promise<VersionStatusCounts> {
+  const res = await tx.execute<{ status: string; cnt: number }>(sql`
+    SELECT status, COUNT(*)::int AS cnt
+    FROM document_versions
+    GROUP BY status
+  `);
+  const counts: VersionStatusCounts = { queued: 0, extracting: 0, extracted: 0, failed: 0 };
+  for (const row of res.rows) {
+    if (
+      row.status === 'queued' ||
+      row.status === 'extracting' ||
+      row.status === 'extracted' ||
+      row.status === 'failed'
+    ) {
+      counts[row.status] = row.cnt;
+    }
+  }
+  return counts;
+}
