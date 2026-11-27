@@ -140,7 +140,7 @@ export class FakeLlmProvider implements LlmProvider {
     const latencyMs = Date.now() - startMs;
 
     if (entry.kind === 'ok') {
-      const rawText = JSON.stringify(entry.output);
+      const rawText = JSON.stringify(entry.output) ?? '';
       return {
         kind: 'ok',
         output: entry.output,
@@ -156,10 +156,18 @@ export class FakeLlmProvider implements LlmProvider {
     }
 
     const rawText = entry.rawText ?? '';
+    let parsedRaw: unknown = rawText;
+    if (rawText.length > 0) {
+      try {
+        parsedRaw = JSON.parse(rawText);
+      } catch {
+        parsedRaw = rawText;
+      }
+    }
     return {
       kind: entry.kind,
       rawText,
-      raw: rawText,
+      raw: parsedRaw,
       usage,
       stopReason: entry.stopReason ?? entry.kind.toUpperCase(),
       latencyMs,

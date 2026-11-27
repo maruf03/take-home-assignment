@@ -25,16 +25,24 @@ const GEMINI_REFUSAL_REASONS: ReadonlySet<string> = new Set([
   'BLOCKLIST',
   'SPII',
   'IMAGE_SAFETY',
+  'IMAGE_PROHIBITED_CONTENT',
+  'IMAGE_RECITATION',
+  'ESCALATION',
+  'PUP_LIMITED_DISABLED',
 ]);
 
 interface GeminiRawBody {
   candidates?: Array<{
     content?: {
       role?: string;
-      parts?: Array<{ text?: string }>;
+      parts?: Array<{ text?: string; thought?: boolean }>;
     };
     finishReason?: string;
   }>;
+  promptFeedback?: {
+    blockReason?: string;
+    blockReasonMessage?: string;
+  };
   usageMetadata?: {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
@@ -67,7 +75,10 @@ function extractPreviousModelText(previousRaw: unknown): string {
     const body = previousRaw as GeminiRawBody;
     const parts = body.candidates?.[0]?.content?.parts;
     if (Array.isArray(parts)) {
-      const joined = parts.map((p) => p.text ?? '').join('');
+      const joined = parts
+        .filter((p) => p.thought !== true)
+        .map((p) => p.text ?? '')
+        .join('');
       if (joined.length > 0) {
         return joined;
       }
@@ -104,7 +115,12 @@ export function parseGeminiRawResponse(
   const servedModel = typeof body.modelVersion === 'string' ? body.modelVersion : null;
   const providerRequestId = typeof body.responseId === 'string' ? body.responseId : null;
   const candidate = body.candidates?.[0];
-  const stopReason = candidate?.finishReason ?? 'UNKNOWN';
+  const blockReason =
+    typeof body.promptFeedback?.blockReason === 'string' &&
+    body.promptFeedback.blockReason !== 'BLOCKED_REASON_UNSPECIFIED'
+      ? body.promptFeedback.blockReason
+      : undefined;
+  const stopReason = candidate?.finishReason ?? blockReason ?? 'UNKNOWN';
 
   const base = {
     rawText,
@@ -118,7 +134,7 @@ export function parseGeminiRawResponse(
   };
 
   if (!candidate) {
-    return { ...base, kind: 'no_output' };
+    return { ...base, kind: blockReason ? 'refused' : 'no_output' };
   }
   if (stopReason === 'MAX_TOKENS') {
     return { ...base, kind: 'truncated' };
@@ -127,9 +143,12 @@ export function parseGeminiRawResponse(
     return { ...base, kind: 'refused' };
   }
 
-  const text = (candidate.content?.parts ?? []).map((p) => p.text ?? '').join('');
+  const text = (candidate.content?.parts ?? [])
+    .filter((p) => p.thought !== true)
+    .map((p) => p.text ?? '')
+    .join('');
   if (text.trim().length === 0) {
-    return { ...base, kind: 'no_output' };
+    return { ...base, kind: blockReason ? 'refused' : 'no_output' };
   }
 
   try {
@@ -150,7 +169,10 @@ export function parseGeminiRawResponse(
 export function mapGeminiHttpError(status: number, rawText: string, headers?: Headers): LlmError {
   const raw = safeJsonParse(rawText);
   const body = (typeof raw === 'object' && raw !== null ? raw : {}) as GeminiRawBody;
-  const message = body.error?.message ?? `Gemini API error (HTTP ${status})`;
+  const trimmedRaw = typeof raw === 'string' ? raw.trim().slice(0, 200) : '';
+  const message =
+    body.error?.message ??
+    (trimmedRaw.length > 0 ? trimmedRaw : `Gemini API error (HTTP ${status})`);
   const details = Array.isArray(body.error?.details) ? body.error.details : [];
 
   if (status === 429) {
@@ -199,11 +221,14 @@ export function mapGeminiHttpError(status: number, rawText: string, headers?: He
     });
   }
 
+  if (status === 408 || status === 504) {
+    return new LlmError('TIMEOUT', message, { transient: true, status, raw });
+  }
+  if (status === 499) {
+    return new LlmError('NETWORK', message, { transient: true, status, raw });
+  }
   if (status === 503) {
     return new LlmError('OVERLOADED', message, { transient: true, status, raw });
-  }
-  if (status === 504) {
-    return new LlmError('TIMEOUT', message, { transient: true, status, raw });
   }
   if (status >= 500) {
     return new LlmError('SERVER', message, { transient: true, status, raw });
@@ -254,12 +279,25 @@ export class GeminiProvider implements LlmProvider {
 
   async extract(req: ExtractionRequest): Promise<ExtractionResult> {
     const startMs = Date.now();
+    if (req.signal?.aborted) {
+      throw new LlmError('ABORTED', 'Gemini request aborted by caller signal', {
+        transient: false,
+      });
+    }
+
     let capturedRawText: string | null = null;
     let capturedStatus: number | null = null;
     let capturedHeaders: Headers | undefined;
 
+    // Own the timeout signal explicitly so internal timeouts are always classified as
+    // transient TIMEOUT (never permanent ABORTED, which means fenced loss in the worker).
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const combinedSignal = req.signal
+      ? AbortSignal.any([req.signal, timeoutSignal])
+      : timeoutSignal;
+
     const capturingFetch: typeof fetch = async (input, init) => {
-      const response = await fetch(input, init);
+      const response = await fetch(input, { ...init, signal: combinedSignal });
       capturedStatus = response.status;
       capturedHeaders = response.headers;
       capturedRawText = await response.clone().text();
@@ -285,7 +323,7 @@ export class GeminiProvider implements LlmProvider {
           responseMimeType: 'application/json',
           responseJsonSchema: req.schema,
           thinkingConfig: { thinkingBudget: 0 },
-          ...(req.signal ? { abortSignal: req.signal } : {}),
+          abortSignal: combinedSignal,
           httpOptions: {
             ...(this.baseUrl ? { baseUrl: this.baseUrl } : {}),
             timeout: this.timeoutMs,
@@ -308,6 +346,12 @@ export class GeminiProvider implements LlmProvider {
           cause: err,
         });
       }
+      if (timeoutSignal.aborted) {
+        throw new LlmError('TIMEOUT', `Gemini request timed out after ${this.timeoutMs}ms`, {
+          transient: true,
+          cause: err,
+        });
+      }
       if (capturedStatus !== null && capturedStatus >= 400) {
         throw mapGeminiHttpError(capturedStatus, capturedRawText ?? '', capturedHeaders);
       }
@@ -317,7 +361,10 @@ export class GeminiProvider implements LlmProvider {
         throw new LlmError('TIMEOUT', errMsg, { transient: true, cause: err });
       }
       if (errName === 'AbortError') {
-        throw new LlmError('ABORTED', errMsg, { transient: false, cause: err });
+        throw new LlmError('TIMEOUT', `Gemini request aborted by internal timeout: ${errMsg}`, {
+          transient: true,
+          cause: err,
+        });
       }
       throw new LlmError('NETWORK', errMsg, { transient: true, cause: err });
     }

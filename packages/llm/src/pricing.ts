@@ -14,7 +14,7 @@ const PRICING_TABLE: Readonly<Record<string, ModelPricingRate>> = {
   'gemini-3.5-flash-lite': { inputPerMillionUsd: 0.075, outputPerMillionUsd: 0.3 },
   'gemini-3.1-flash-lite': { inputPerMillionUsd: 0.075, outputPerMillionUsd: 0.3 },
   'gemini-2.5-flash': { inputPerMillionUsd: 0.15, outputPerMillionUsd: 0.6 },
-  // Anthropic Claude 5.5 family (USD per 1M tokens)
+  // Anthropic Claude 5.5 & 4.5 families (USD per 1M tokens)
   'claude-sonnet-5-5': {
     inputPerMillionUsd: 3.0,
     outputPerMillionUsd: 15.0,
@@ -33,19 +33,47 @@ const PRICING_TABLE: Readonly<Record<string, ModelPricingRate>> = {
     cacheCreationMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
+  'claude-sonnet-4-5': {
+    inputPerMillionUsd: 3.0,
+    outputPerMillionUsd: 15.0,
+    cacheCreationMultiplier: 1.25,
+    cacheReadMultiplier: 0.1,
+  },
+  'claude-haiku-4-5': {
+    inputPerMillionUsd: 1.0,
+    outputPerMillionUsd: 5.0,
+    cacheCreationMultiplier: 1.25,
+    cacheReadMultiplier: 0.1,
+  },
+  'claude-opus-4-5': {
+    inputPerMillionUsd: 15.0,
+    outputPerMillionUsd: 75.0,
+    cacheCreationMultiplier: 1.25,
+    cacheReadMultiplier: 0.1,
+  },
 };
+
+// Longest keys first so e.g. `gemini-3.5-flash-lite-001` matches `gemini-3.5-flash-lite`
+// before `gemini-3.5-flash`.
+const SORTED_PRICING_ENTRIES: ReadonlyArray<readonly [string, ModelPricingRate]> = Object.entries(
+  PRICING_TABLE,
+).sort(([a], [b]) => b.length - a.length);
 
 function lookupPricingRate(model: string): ModelPricingRate | undefined {
   const exact = PRICING_TABLE[model];
   if (exact) {
     return exact;
   }
-  for (const [key, rate] of Object.entries(PRICING_TABLE)) {
+  for (const [key, rate] of SORTED_PRICING_ENTRIES) {
     if (model.startsWith(`${key}-`)) {
       return rate;
     }
   }
   return undefined;
+}
+
+function safeTokenCount(tokens: number | undefined): number {
+  return tokens !== undefined && Number.isFinite(tokens) && tokens > 0 ? tokens : 0;
 }
 
 /**
@@ -64,20 +92,18 @@ export function estimateCostUsd(
   }
 
   const perM = 1_000_000;
-  const inputCost = (Math.max(0, usage.inputTokens) / perM) * rate.inputPerMillionUsd;
-  const outputCost = (Math.max(0, usage.outputTokens) / perM) * rate.outputPerMillionUsd;
-  const cacheCreateCost =
-    usage.cacheCreationInputTokens && rate.cacheCreationMultiplier
-      ? (Math.max(0, usage.cacheCreationInputTokens) / perM) *
-        rate.inputPerMillionUsd *
-        rate.cacheCreationMultiplier
-      : 0;
-  const cacheReadCost =
-    usage.cacheReadInputTokens && rate.cacheReadMultiplier
-      ? (Math.max(0, usage.cacheReadInputTokens) / perM) *
-        rate.inputPerMillionUsd *
-        rate.cacheReadMultiplier
-      : 0;
+  const inputCost = (safeTokenCount(usage.inputTokens) / perM) * rate.inputPerMillionUsd;
+  const outputCost = (safeTokenCount(usage.outputTokens) / perM) * rate.outputPerMillionUsd;
+  const cacheCreateCost = rate.cacheCreationMultiplier
+    ? (safeTokenCount(usage.cacheCreationInputTokens) / perM) *
+      rate.inputPerMillionUsd *
+      rate.cacheCreationMultiplier
+    : 0;
+  const cacheReadCost = rate.cacheReadMultiplier
+    ? (safeTokenCount(usage.cacheReadInputTokens) / perM) *
+      rate.inputPerMillionUsd *
+      rate.cacheReadMultiplier
+    : 0;
 
   return Number((inputCost + outputCost + cacheCreateCost + cacheReadCost).toFixed(6));
 }

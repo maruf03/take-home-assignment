@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -17,11 +18,13 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   CassetteProvider,
+  computeCassetteKey,
   createProvider,
   estimateCostUsd,
   FakeIpcLlmProvider,
   FakeLlmProvider,
   LlmError,
+  parseRetryDelayMs,
   resolveLimiterConfig,
 } from '../src/index.js';
 
@@ -90,6 +93,24 @@ describe('[I8] createProvider security boundary, limiter config, pricing, fake &
       'claude-sonnet-5-5',
     );
     expect(anthCost).toBeGreaterThan(0);
+
+    // Longest-prefix pricing: gemini-3.5-flash-lite-001 must NOT be shadowed by gemini-3.5-flash
+    const liteSnapshotCost = estimateCostUsd(
+      { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+      'gemini-3.5-flash-lite-001',
+    );
+    expect(liteSnapshotCost).toBe(0.375);
+
+    // Non-finite tokens never produce NaN
+    expect(estimateCostUsd({ inputTokens: Number.NaN, outputTokens: 0 }, 'gemini-3.5-flash')).toBe(
+      0,
+    );
+
+    // parseRetryDelayMs rejects negative numbers and non-dates (guards against V8 Date.parse('-5'))
+    expect(parseRetryDelayMs('-5')).toBeUndefined();
+    expect(parseRetryDelayMs('invalid 5')).toBeUndefined();
+    expect(parseRetryDelayMs('39.5s')).toBe(39_500);
+    expect(parseRetryDelayMs('250ms')).toBe(250);
   });
 
   it('FakeLlmProvider and FakeIpcLlmProvider execute scripted scenarios cleanly', async () => {
@@ -299,6 +320,132 @@ describe('CassetteProvider replay through real Gemini adapter mapping', () => {
       const classification = classifyChange(toBaseline(oldField), newField, carryoverCtx);
       expect(classification.changeKind, `carryover ${changedKey}`).toBe('changed');
       expect(classification.changeReason, `carryover reason ${changedKey}`).toBe('VALUE_CHANGED');
+    }
+  });
+
+  it('enforces model scoping, promptVersion validation, abort handling, and Anthropic replay in CassetteProvider + error paths in FakeIpcLlmProvider', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'llm-cassette-test-'));
+    try {
+      const anthDir = path.join(tmpDir, 'anthropic');
+      await mkdir(anthDir, { recursive: true });
+      const rawAnthropic = JSON.stringify({
+        id: 'msg_cas_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-5-5-20261001',
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_c1',
+            name: 'record_extraction',
+            input: { fields: {}, document_flags: { suspicious_instructions: false, spans: [] } },
+          },
+        ],
+        usage: { input_tokens: 120, output_tokens: 45 },
+      });
+      const keyHash = computeCassetteKey({
+        provider: 'anthropic',
+        requestedModel: 'claude-sonnet-5-5',
+        cacheKey: 'doc-anth-1',
+      });
+      await writeFile(
+        path.join(anthDir, 'sample.json'),
+        JSON.stringify({
+          version: 1,
+          provider: 'anthropic',
+          requestedModel: 'claude-sonnet-5-5',
+          promptVersion: 'v1',
+          key: keyHash,
+          documentFingerprint: 'fp-anth-1',
+          recordedAt: '2026-11-28T00:00:00.000Z',
+          providerRequestId: 'req_anth_cas',
+          rawText: rawAnthropic,
+        }),
+        'utf8',
+      );
+
+      const anthCassette = new CassetteProvider({
+        cassettesDir: tmpDir,
+        recordedProvider: 'anthropic',
+        expectedPromptVersion: 'v1',
+      });
+      const baseReq = {
+        system: 'sys',
+        user: 'usr',
+        schema: {},
+        toolName: 'record_extraction',
+        model: 'claude-sonnet-5-5',
+        maxOutputTokens: 512,
+        cacheKey: 'doc-anth-1',
+      };
+
+      const replayed = await anthCassette.extract(baseReq);
+      expect(replayed.kind).toBe('ok');
+      expect(replayed.providerRequestId).toBe('req_anth_cas');
+
+      // Different requestedModel must NOT match a cassette recorded for another model
+      await expect(
+        anthCassette.extract({ ...baseReq, model: 'claude-haiku-5-5' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST', transient: false });
+
+      // Mismatched promptVersion fails cleanly
+      await expect(anthCassette.extract({ ...baseReq, promptVersion: 'v2' })).rejects.toMatchObject(
+        { code: 'BAD_REQUEST', transient: false },
+      );
+
+      // Aborted signal fails with ABORTED
+      const ac = new AbortController();
+      ac.abort();
+      await expect(anthCassette.extract({ ...baseReq, signal: ac.signal })).rejects.toMatchObject({
+        code: 'ABORTED',
+        transient: false,
+      });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+
+    // FakeIpcLlmProvider error response and invalid JSON handling
+    let mode: 'error' | 'bad-json' = 'error';
+    const srv = createServer((_req, res) => {
+      if (mode === 'error') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            type: 'error',
+            error: { code: 'RATE_LIMITED', message: 'ipc 429', transient: true, retryAfterMs: 500 },
+          }),
+        );
+      } else {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('not-json');
+      }
+    });
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', () => resolve()));
+    try {
+      const addr = srv.address() as AddressInfo;
+      const ipc = new FakeIpcLlmProvider({ endpoint: `http://127.0.0.1:${addr.port}` });
+      const req = {
+        system: 'sys',
+        user: 'usr',
+        schema: {},
+        toolName: 'record_extraction',
+        model: 'gemini-3.5-flash',
+        maxOutputTokens: 512,
+        cacheKey: 'k1',
+      };
+      await expect(ipc.extract(req)).rejects.toMatchObject({
+        code: 'RATE_LIMITED',
+        transient: true,
+        retryAfterMs: 500,
+      });
+      mode = 'bad-json';
+      await expect(ipc.extract(req)).rejects.toMatchObject({
+        code: 'NETWORK',
+        transient: true,
+      });
+    } finally {
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
     }
   });
 

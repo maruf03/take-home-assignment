@@ -16,6 +16,7 @@ export interface CreateProviderConfig {
   readonly timeoutMs?: number;
   readonly cassettesDir?: string;
   readonly cassetteRecordedProvider?: RecordedProviderName;
+  readonly cassetteExpectedPromptVersion?: string;
   readonly fakeScript?: readonly FakeScriptEntry[];
   readonly fakeIpcEndpoint?: string;
 }
@@ -63,6 +64,14 @@ export function createProvider(config: CreateProviderConfig): LlmProvider {
       return new CassetteProvider({
         cassettesDir: config.cassettesDir,
         recordedProvider: config.cassetteRecordedProvider ?? 'gemini',
+        expectedPromptVersion: config.cassetteExpectedPromptVersion,
       });
+
+    default: {
+      const unknownProvider: string = config.provider;
+      throw new LlmError('BAD_REQUEST', `Unsupported LLM provider "${unknownProvider}"`, {
+        transient: false,
+      });
+    }
   }
 }

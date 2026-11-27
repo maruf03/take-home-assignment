@@ -53,6 +53,10 @@ export function parseRetryDelayMs(raw: string | null | undefined): number | unde
     return undefined;
   }
 
+  if (trimmed.startsWith('-')) {
+    return undefined;
+  }
+
   const msMatch = /^(\d+(?:\.\d+)?)ms$/i.exec(trimmed);
   if (msMatch?.[1]) {
     const val = Number(msMatch[1]);
@@ -70,9 +74,19 @@ export function parseRetryDelayMs(raw: string | null | undefined): number | unde
     return Number.isFinite(val) && val >= 0 ? Math.ceil(val * 1000) : undefined;
   }
 
-  const dateMs = Date.parse(trimmed);
-  if (Number.isFinite(dateMs)) {
-    return Math.max(0, dateMs - Date.now());
+  // Only invoke Date.parse on plausible HTTP-date (RFC 7231) or ISO-8601 timestamps;
+  // V8's permissive Date.parse otherwise parses strings like "-5" or "invalid 5" into dates.
+  const looksLikeHttpDate =
+    /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s+\d{2}:\d{2}:\d{2}\s+(?:GMT|UTC)$/i.test(
+      trimmed,
+    );
+  const looksLikeIsoDate =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(trimmed);
+  if (looksLikeHttpDate || looksLikeIsoDate) {
+    const dateMs = Date.parse(trimmed);
+    if (Number.isFinite(dateMs)) {
+      return Math.max(0, dateMs - Date.now());
+    }
   }
 
   return undefined;

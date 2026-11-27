@@ -30,6 +30,7 @@ export interface CassetteRecord {
 export interface CassetteProviderOptions {
   readonly cassettesDir: string;
   readonly recordedProvider?: RecordedProviderName;
+  readonly expectedPromptVersion?: string;
 }
 
 /**
@@ -72,11 +73,13 @@ export class CassetteProvider implements LlmProvider {
 
   private readonly cassettesDir: string;
   private readonly recordedProvider: RecordedProviderName;
+  private readonly expectedPromptVersion?: string;
   private indexPromise: Promise<Map<string, CassetteRecord>> | null = null;
 
   constructor(options: CassetteProviderOptions) {
     this.cassettesDir = options.cassettesDir;
     this.recordedProvider = options.recordedProvider ?? 'gemini';
+    this.expectedPromptVersion = options.expectedPromptVersion;
   }
 
   estimateCostUsd(usage: LlmUsage, model: string, servedModel?: string | null): number {
@@ -87,7 +90,7 @@ export class CassetteProvider implements LlmProvider {
     if (this.indexPromise) {
       return this.indexPromise;
     }
-    this.indexPromise = (async () => {
+    const pending = (async () => {
       const dir = path.join(this.cassettesDir, this.recordedProvider);
       const index = new Map<string, CassetteRecord>();
       let entries: string[];
@@ -105,20 +108,36 @@ export class CassetteProvider implements LlmProvider {
         if (!file.endsWith('.json')) {
           continue;
         }
-        const raw = await readFile(path.join(dir, file), 'utf8');
-        const record = JSON.parse(raw) as CassetteRecord;
+        const filePath = path.join(dir, file);
+        let record: CassetteRecord;
+        try {
+          const raw = await readFile(filePath, 'utf8');
+          record = JSON.parse(raw) as CassetteRecord;
+        } catch (err) {
+          throw new LlmError(
+            'BAD_REQUEST',
+            `Invalid cassette JSON at "${filePath}": ${err instanceof Error ? err.message : String(err)}`,
+            { transient: false, cause: err },
+          );
+        }
         const stem = file.slice(0, -'.json'.length);
-        index.set(`stem:${stem}`, record);
-        index.set(`key:${record.key}`, record);
+        const modelScope = record.requestedModel;
+        index.set(`stem:${modelScope}:${stem}`, record);
+        index.set(`key:${modelScope}:${record.key}`, record);
         if (record.documentFingerprint) {
-          index.set(`doc:${record.requestedModel}:${record.documentFingerprint}`, record);
-          index.set(`doc-any:${record.documentFingerprint}`, record);
+          index.set(`doc:${modelScope}:${record.documentFingerprint}`, record);
         }
       }
 
       return index;
     })();
-    return this.indexPromise;
+    this.indexPromise = pending;
+    try {
+      return await pending;
+    } catch (err) {
+      this.indexPromise = null;
+      throw err;
+    }
   }
 
   async extract(req: ExtractionRequest): Promise<ExtractionResult> {
@@ -128,6 +147,10 @@ export class CassetteProvider implements LlmProvider {
     }
 
     const index = await this.loadIndex();
+    if (req.signal?.aborted) {
+      throw new LlmError('ABORTED', 'Cassette replay aborted', { transient: false });
+    }
+
     const docFp = computeDocumentFingerprint(req.user);
     const computedKey = computeCassetteKey({
       provider: this.recordedProvider,
@@ -136,16 +159,24 @@ export class CassetteProvider implements LlmProvider {
     });
 
     const record =
-      index.get(`key:${req.cacheKey}`) ??
-      index.get(`key:${computedKey}`) ??
-      index.get(`stem:${req.cacheKey}`) ??
-      index.get(`doc:${req.model}:${docFp}`) ??
-      index.get(`doc-any:${docFp}`);
+      index.get(`key:${req.model}:${req.cacheKey}`) ??
+      index.get(`key:${req.model}:${computedKey}`) ??
+      index.get(`stem:${req.model}:${req.cacheKey}`) ??
+      index.get(`doc:${req.model}:${docFp}`);
 
     if (!record) {
       throw new LlmError(
         'BAD_REQUEST',
         `No recorded ${this.recordedProvider} cassette matched cacheKey="${req.cacheKey}" for model="${req.model}"`,
+        { transient: false },
+      );
+    }
+
+    const expectedVersion = req.promptVersion ?? this.expectedPromptVersion;
+    if (expectedVersion && record.promptVersion !== expectedVersion) {
+      throw new LlmError(
+        'BAD_REQUEST',
+        `Cassette "${record.key}" promptVersion="${record.promptVersion}" does not match expected "${expectedVersion}"`,
         { transient: false },
       );
     }

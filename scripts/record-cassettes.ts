@@ -6,6 +6,7 @@ import type { DateOrder, FieldType } from '@app/contracts/status';
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const FIXTURES_DIR = path.join(REPO_ROOT, 'fixtures');
 const GOLDEN_TEXT_DIR = path.join(REPO_ROOT, 'fixtures-golden', 'text');
+const GOLDEN_RANGES_DIR = path.join(REPO_ROOT, 'fixtures-golden', 'ranges');
 const CASSETTES_DIR = path.join(REPO_ROOT, 'fixtures-golden', 'cassettes', 'gemini');
 const HINTS_PATH = path.join(REPO_ROOT, 'packages', 'db', 'assets', 'template-hints.json');
 
@@ -103,6 +104,13 @@ async function main(): Promise<void> {
     }
 
     const text = await readFile(path.join(GOLDEN_TEXT_DIR, `${fc.stem}.txt`), 'utf8');
+    const rangesPath = path.join(GOLDEN_RANGES_DIR, `${fc.stem}.ranges.json`);
+    const ranges = existsSync(rangesPath)
+      ? (JSON.parse(await readFile(rangesPath, 'utf8')) as {
+          hidden: Array<[number, number]>;
+          lowVisibility: Array<[number, number]>;
+        })
+      : { hidden: [], lowVisibility: [] };
     const typeHint = hints[fc.docType];
     const template = {
       documentType: fc.docType,
@@ -118,7 +126,7 @@ async function main(): Promise<void> {
       })),
     };
 
-    const prompt = buildPrompt(template, text, { hidden: [], lowVisibility: [] }, 'recordnonce');
+    const prompt = buildPrompt(template, text, ranges, 'recordnonce');
     const schema = buildToolSchema(template);
 
     let result;
@@ -153,12 +161,7 @@ async function main(): Promise<void> {
     if (!parsed.ok) {
       throw new Error(`Recorded output failed schema validation for ${fc.stem}`);
     }
-    const validated = validateExtraction(
-      template,
-      text,
-      { hidden: [], lowVisibility: [] },
-      parsed.data,
-    );
+    const validated = validateExtraction(template, text, ranges, parsed.data);
     const valCount = validated.filter((v) => v.kind === 'value').length;
     const gapCount = validated.filter((v) => v.kind === 'gap').length;
 

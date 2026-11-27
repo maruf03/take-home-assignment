@@ -7,6 +7,7 @@ interface MockResponseSpec {
   status: number;
   headers?: Record<string, string>;
   body: string;
+  stallBodyMs?: number;
 }
 
 const SAMPLE_SCHEMA = {
@@ -73,11 +74,26 @@ describe('AnthropicProvider (mock HTTP server, §5.3)', () => {
       const bodyStr = Buffer.concat(chunks).toString('utf8');
       lastRequestBody = bodyStr ? (JSON.parse(bodyStr) as Record<string, unknown>) : null;
 
-      res.writeHead(nextResponse.status, {
+      const spec = nextResponse;
+      res.writeHead(spec.status, {
         'content-type': 'application/json',
-        ...(nextResponse.headers ?? {}),
+        ...(spec.headers ?? {}),
       });
-      res.end(nextResponse.body);
+      if (spec.stallBodyMs && spec.stallBodyMs > 0) {
+        res.write('{"partial":');
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, spec.stallBodyMs);
+          req.once('close', () => {
+            clearTimeout(t);
+            resolve();
+          });
+        });
+        if (!res.destroyed) {
+          res.end('true}');
+        }
+        return;
+      }
+      res.end(spec.body);
     });
 
     await new Promise<void>((resolve) => {
@@ -324,6 +340,117 @@ describe('AnthropicProvider (mock HTTP server, §5.3)', () => {
     };
     await expect(provider.extract(makeReq())).rejects.toMatchObject({
       code: 'BAD_REQUEST',
+      transient: false,
+    });
+
+    // 429 with HTTP-date retry-after and whitespace/invalid retry-after-ms falls back cleanly
+    const futureHttpDate = new Date(Date.now() + 10_000).toUTCString();
+    nextResponse = {
+      status: 429,
+      headers: { 'retry-after-ms': '   ', 'retry-after': futureHttpDate },
+      body: JSON.stringify({
+        type: 'error',
+        error: { type: 'rate_limit_error', message: 'http date retry' },
+      }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+      transient: true,
+    });
+
+    // 429 with valid retry-after-ms (already suffixed or numeric) -> RATE_LIMITED
+    nextResponse = {
+      status: 429,
+      headers: { 'retry-after-ms': '1500ms' },
+      body: JSON.stringify({
+        type: 'error',
+        error: { type: 'rate_limit_error', message: 'ms retry' },
+      }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+      transient: true,
+      retryAfterMs: 1500,
+    });
+
+    // 408 -> transient TIMEOUT; 403 -> AUTH; 404 -> MODEL_NOT_FOUND; 500 (default retryable) -> transient SERVER
+    nextResponse = {
+      status: 408,
+      body: JSON.stringify({ type: 'error', error: { message: 'timeout' } }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'TIMEOUT',
+      transient: true,
+    });
+    nextResponse = {
+      status: 403,
+      body: JSON.stringify({ type: 'error', error: { message: 'forbidden' } }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'AUTH',
+      transient: false,
+    });
+    nextResponse = {
+      status: 404,
+      body: JSON.stringify({ type: 'error', error: { message: 'not found' } }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'MODEL_NOT_FOUND',
+      transient: false,
+    });
+    nextResponse = {
+      status: 500,
+      body: JSON.stringify({ type: 'error', error: { message: 'transient' } }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'SERVER',
+      transient: true,
+    });
+
+    // end_turn without tool_use -> no_output; non-strict model omits strict: true
+    nextResponse = {
+      status: 200,
+      body: JSON.stringify({
+        id: 'msg_no',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-3-5-sonnet-20241022',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'no tool used' }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    };
+    expect((await provider.extract(makeReq({ model: 'claude-3-5-sonnet-20241022' }))).kind).toBe(
+      'no_output',
+    );
+    const nonStrictTools = lastRequestBody?.['tools'] as Array<Record<string, unknown>>;
+    expect(nonStrictTools[0]?.['strict']).toBeUndefined();
+  });
+
+  it('enforces timeout and caller AbortSignal even when response stalls mid-body after HTTP 200 headers', async () => {
+    // 1. Mid-body stall hits provider timeoutMs -> transient TIMEOUT
+    const fastTimeoutProvider = new AnthropicProvider({
+      apiKey: 'test-key',
+      baseURL: baseUrl,
+      timeoutMs: 80,
+    });
+    nextResponse = { status: 200, body: '{}', stallBodyMs: 500 };
+    await expect(fastTimeoutProvider.extract(makeReq())).rejects.toMatchObject({
+      code: 'TIMEOUT',
+      transient: true,
+    });
+
+    // 2. Mid-body caller abort -> permanent ABORTED (never NETWORK)
+    const provider = new AnthropicProvider({
+      apiKey: 'test-key',
+      baseURL: baseUrl,
+      timeoutMs: 5_000,
+    });
+    const ac = new AbortController();
+    nextResponse = { status: 200, body: '{}', stallBodyMs: 500 };
+    setTimeout(() => ac.abort(), 30);
+    await expect(provider.extract(makeReq({ signal: ac.signal }))).rejects.toMatchObject({
+      code: 'ABORTED',
       transient: false,
     });
   });

@@ -64,9 +64,12 @@ function extractPreviousToolUse(
   previousRaw: unknown,
   toolName: string,
 ): { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } {
-  if (typeof previousRaw === 'object' && previousRaw !== null) {
-    const msg = previousRaw as AnthropicRawMessage;
-    const block = msg.content?.find((b) => b.type === 'tool_use');
+  const parsed = typeof previousRaw === 'string' ? safeJsonParse(previousRaw) : previousRaw;
+  if (typeof parsed === 'object' && parsed !== null) {
+    const msg = parsed as AnthropicRawMessage;
+    const block =
+      msg.content?.find((b) => b.type === 'tool_use' && b.name === toolName) ??
+      msg.content?.find((b) => b.type === 'tool_use');
     if (block && typeof block.id === 'string') {
       const inputObj =
         typeof block.input === 'object' && block.input !== null && !Array.isArray(block.input)
@@ -173,11 +176,16 @@ function mapAnthropicError(err: unknown): LlmError {
     const shouldRetry = readHeader(headers, 'x-should-retry');
 
     if (status === 429) {
-      const retryAfterMsHeader = readHeader(headers, 'retry-after-ms');
+      const rawRetryAfterMs = readHeader(headers, 'retry-after-ms')?.trim();
       const retryAfterHeader = readHeader(headers, 'retry-after');
-      const retryAfterMs = retryAfterMsHeader
-        ? parseRetryDelayMs(`${retryAfterMsHeader}ms`)
-        : parseRetryDelayMs(retryAfterHeader);
+      const normalizedMsHeader =
+        rawRetryAfterMs && rawRetryAfterMs.length > 0
+          ? /ms$/i.test(rawRetryAfterMs)
+            ? rawRetryAfterMs
+            : `${rawRetryAfterMs}ms`
+          : undefined;
+      const retryAfterMs =
+        parseRetryDelayMs(normalizedMsHeader) ?? parseRetryDelayMs(retryAfterHeader);
 
       if (retryAfterMs === undefined) {
         return new LlmError('RATE_CAPPED', err.message, {
@@ -190,6 +198,24 @@ function mapAnthropicError(err: unknown): LlmError {
       return new LlmError('RATE_LIMITED', err.message, {
         transient: true,
         retryAfterMs,
+        status,
+        raw: err.error,
+        cause: err,
+      });
+    }
+
+    if (status === 408) {
+      return new LlmError('TIMEOUT', err.message, {
+        transient: shouldRetry !== 'false',
+        status,
+        raw: err.error,
+        cause: err,
+      });
+    }
+
+    if (status === 499) {
+      return new LlmError('NETWORK', err.message, {
+        transient: shouldRetry !== 'false',
         status,
         raw: err.error,
         cause: err,
@@ -277,6 +303,11 @@ export class AnthropicProvider implements LlmProvider {
 
   async extract(req: ExtractionRequest): Promise<ExtractionResult> {
     const startMs = Date.now();
+    if (req.signal?.aborted) {
+      throw new LlmError('ABORTED', 'Anthropic request aborted by caller signal', {
+        transient: false,
+      });
+    }
 
     const tool: Anthropic.Tool & { strict?: boolean } = {
       name: req.toolName,
@@ -305,8 +336,17 @@ export class AnthropicProvider implements LlmProvider {
       );
     }
 
+    // Own the timeout signal across both headers and `await httpRes.text()`, because
+    // `@anthropic-ai/sdk`'s internal `timedFetch` clears its timer as soon as headers arrive.
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const combinedSignal = req.signal
+      ? AbortSignal.any([req.signal, timeoutSignal])
+      : timeoutSignal;
+
     try {
       // Must use `.asResponse()` (never `.withResponse()`) so the verbatim raw body can be read (spec §5.3).
+      // Note: `@anthropic-ai/sdk@1.14.0` removed `temperature` from `MessageCreateParamsBase`
+      // for Claude 4.7+/5.x compatibility, so `temperature` is intentionally omitted here.
       const httpRes = await this.client.messages
         .create(
           {
@@ -318,7 +358,7 @@ export class AnthropicProvider implements LlmProvider {
             messages,
           },
           {
-            signal: req.signal,
+            signal: combinedSignal,
             timeout: this.timeoutMs,
           },
         )
@@ -336,6 +376,21 @@ export class AnthropicProvider implements LlmProvider {
         latencyMs,
       );
     } catch (err) {
+      if (err instanceof LlmError) {
+        throw err;
+      }
+      if (req.signal?.aborted) {
+        throw new LlmError('ABORTED', 'Anthropic request aborted by caller signal', {
+          transient: false,
+          cause: err,
+        });
+      }
+      if (timeoutSignal.aborted) {
+        throw new LlmError('TIMEOUT', `Anthropic request timed out after ${this.timeoutMs}ms`, {
+          transient: true,
+          cause: err,
+        });
+      }
       throw mapAnthropicError(err);
     }
   }

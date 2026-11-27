@@ -40,6 +40,7 @@ export interface ExtractionRequest {
   readonly model: string;
   readonly maxOutputTokens: number;
   readonly cacheKey: string;
+  readonly promptVersion?: string;
   readonly signal?: AbortSignal;
   readonly repair?: ExtractionRepairInput;
 }

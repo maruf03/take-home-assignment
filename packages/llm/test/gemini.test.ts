@@ -7,6 +7,7 @@ interface MockResponseSpec {
   status: number;
   headers?: Record<string, string>;
   body: string;
+  delayBeforeHeadersMs?: number;
 }
 
 const SAMPLE_SCHEMA = {
@@ -75,11 +76,25 @@ describe('GeminiProvider (mock HTTP server, §15.4 & §15.5)', () => {
       const bodyStr = Buffer.concat(chunks).toString('utf8');
       lastRequestBody = bodyStr ? (JSON.parse(bodyStr) as Record<string, unknown>) : null;
 
-      res.writeHead(nextResponse.status, {
+      const spec = nextResponse;
+      if (spec.delayBeforeHeadersMs && spec.delayBeforeHeadersMs > 0) {
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, spec.delayBeforeHeadersMs);
+          req.once('close', () => {
+            clearTimeout(t);
+            resolve();
+          });
+        });
+        if (res.destroyed || req.destroyed) {
+          return;
+        }
+      }
+
+      res.writeHead(spec.status, {
         'content-type': 'application/json',
-        ...(nextResponse.headers ?? {}),
+        ...(spec.headers ?? {}),
       });
-      res.end(nextResponse.body);
+      res.end(spec.body);
     });
 
     await new Promise<void>((resolve) => {
@@ -351,5 +366,122 @@ describe('GeminiProvider (mock HTTP server, §15.4 & §15.5)', () => {
     }
     expect(caught).toBeInstanceOf(LlmError);
     expect(caught).toMatchObject({ code: 'AUTH', transient: false });
+
+    // 401 -> permanent AUTH
+    nextResponse = {
+      status: 401,
+      body: JSON.stringify({ error: { code: 401, status: 'UNAUTHENTICATED', message: 'no key' } }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'AUTH',
+      transient: false,
+    });
+
+    // 404 -> permanent MODEL_NOT_FOUND
+    nextResponse = {
+      status: 404,
+      body: JSON.stringify({ error: { code: 404, status: 'NOT_FOUND', message: 'bad model' } }),
+    };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'MODEL_NOT_FOUND',
+      transient: false,
+    });
+
+    // 408 and 504 -> transient TIMEOUT
+    nextResponse = { status: 408, body: 'Request timeout' };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'TIMEOUT',
+      transient: true,
+      status: 408,
+    });
+    nextResponse = { status: 504, body: 'Gateway timeout' };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'TIMEOUT',
+      transient: true,
+      status: 504,
+    });
+
+    // 499 (server-side cancellation, caller did not abort) -> transient NETWORK
+    nextResponse = { status: 499, body: 'Client closed request' };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'NETWORK',
+      transient: true,
+      status: 499,
+    });
+
+    // 500 -> transient SERVER
+    nextResponse = { status: 500, body: 'Internal server error' };
+    await expect(provider.extract(makeReq())).rejects.toMatchObject({
+      code: 'SERVER',
+      transient: true,
+      status: 500,
+    });
+  });
+
+  it('classifies internal timeout as transient TIMEOUT (never ABORTED), caller abort as ABORTED, promptFeedback.blockReason as refused, and ignores thought parts', async () => {
+    // 1. Internal timeoutMs -> transient TIMEOUT (NOT permanent ABORTED)
+    const fastTimeoutProvider = new GeminiProvider({ apiKey: 'test-key', baseUrl, timeoutMs: 80 });
+    nextResponse = { status: 200, body: '{}', delayBeforeHeadersMs: 500 };
+    await expect(fastTimeoutProvider.extract(makeReq())).rejects.toMatchObject({
+      code: 'TIMEOUT',
+      transient: true,
+    });
+
+    // 2. Caller AbortSignal -> permanent ABORTED
+    const provider = new GeminiProvider({ apiKey: 'test-key', baseUrl, timeoutMs: 5_000 });
+    const ac = new AbortController();
+    nextResponse = { status: 200, body: '{}', delayBeforeHeadersMs: 500 };
+    setTimeout(() => ac.abort(), 30);
+    await expect(provider.extract(makeReq({ signal: ac.signal }))).rejects.toMatchObject({
+      code: 'ABORTED',
+      transient: false,
+    });
+
+    // 3. promptFeedback.blockReason -> kind: 'refused' with stopReason preserved
+    nextResponse = {
+      status: 200,
+      body: JSON.stringify({
+        promptFeedback: { blockReason: 'PROHIBITED_CONTENT' },
+        usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 0 },
+      }),
+    };
+    const blocked = await provider.extract(makeReq());
+    expect(blocked.kind).toBe('refused');
+    expect(blocked.stopReason).toBe('PROHIBITED_CONTENT');
+
+    // 4. thought: true parts are ignored when parsing structured JSON
+    nextResponse = {
+      status: 200,
+      body: JSON.stringify({
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [
+                { thought: true, text: 'Let me think step by step...' },
+                {
+                  text: JSON.stringify({
+                    fields: {
+                      vendor_name: {
+                        found: true,
+                        value: 'Acme',
+                        quote: 'Acme',
+                        line: 1,
+                        not_found_reason: '',
+                      },
+                    },
+                    document_flags: { suspicious_instructions: false, spans: [] },
+                  }),
+                },
+              ],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+        usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 20 },
+      }),
+    };
+    const withThought = await provider.extract(makeReq());
+    expect(withThought.kind).toBe('ok');
   });
 });

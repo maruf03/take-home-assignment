@@ -96,7 +96,22 @@ export class FakeIpcLlmProvider implements LlmProvider {
       });
     }
 
-    const payload = (await response.json()) as FakeIpcResponsePayload;
+    let payload: FakeIpcResponsePayload;
+    try {
+      payload = (await response.json()) as FakeIpcResponsePayload;
+    } catch (err) {
+      if (req.signal?.aborted) {
+        throw new LlmError('ABORTED', 'Fake IPC LLM request aborted', {
+          transient: false,
+          cause: err,
+        });
+      }
+      throw new LlmError(
+        'NETWORK',
+        err instanceof Error ? err.message : 'Failed to parse fake-ipc response body',
+        { transient: true, cause: err },
+      );
+    }
     if (payload.type === 'error' && payload.error) {
       throw new LlmError(payload.error.code, payload.error.message, {
         transient: payload.error.transient,
