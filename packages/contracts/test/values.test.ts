@@ -5,8 +5,10 @@ import {
   canonicalDecimal,
   equalValues,
   formatTypedValue,
+  isoCurrencySchema,
   isValidIsoDate,
   parseTypedValue,
+  stringValueSchema,
   type MoneyValue,
   type TypedValue,
 } from '../src/values.js';
@@ -106,6 +108,19 @@ describe('parseTypedValue', () => {
     expect(parseTypedValue('money', { amount: '100', currency: 'US' }).ok).toBe(false);
   });
 
+  it('rejects non-ISO 3-letter words as currency codes and malformed double signs', () => {
+    expect(parseTypedValue('money', 'NET 30').ok).toBe(false);
+    expect(parseTypedValue('money', 'PAY 100').ok).toBe(false);
+    expect(parseTypedValue('money', 'May 2025').ok).toBe(false);
+    expect(parseTypedValue('money', { amount: '100', currency: 'FOO' }).ok).toBe(false);
+    expect(isoCurrencySchema.safeParse('FOO').success).toBe(false);
+    expect(isoCurrencySchema.safeParse('USD').success).toBe(true);
+
+    expect(parseTypedValue('money', '$-+100').ok).toBe(false);
+    expect(parseTypedValue('money', '+$-100').ok).toBe(false);
+    expect(parseTypedValue('money', '--100').ok).toBe(false);
+  });
+
   it('strips trailing % for percent and rejects invalid percent/number strings', () => {
     expect(parseTypedValue('percent', '4.2%')).toEqual({ ok: true, value: '4.2' });
     expect(parseTypedValue('percent', '5.00%')).toEqual({ ok: true, value: '5' });
@@ -116,12 +131,13 @@ describe('parseTypedValue', () => {
     expect(parseTypedValue('number', '1,23,4').ok).toBe(false);
   });
 
-  it('trims strings and enforces length 1..2000', () => {
+  it('trims strings and enforces length 1..2000 (and stringValueSchema rejects blanks)', () => {
     expect(parseTypedValue('string', '  MERIDIAN OFFICE SUPPLIES LLC  ')).toEqual({
       ok: true,
       value: 'MERIDIAN OFFICE SUPPLIES LLC',
     });
     expect(parseTypedValue('string', '   ').ok).toBe(false);
+    expect(stringValueSchema.safeParse('   ').success).toBe(false);
     expect(parseTypedValue('string', 'a'.repeat(2001)).ok).toBe(false);
   });
 });

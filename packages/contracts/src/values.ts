@@ -29,6 +29,12 @@ export interface TemplateValueContext {
 
 export type ParseTypedValueResult = { ok: true; value: TypedValue } | { ok: false; error: string };
 
+const VALID_ISO_CURRENCIES: ReadonlySet<string> = new Set(Intl.supportedValuesOf('currency'));
+
+export function isValidIsoCurrency(code: string): boolean {
+  return ISO_CURRENCY_REGEX.test(code) && VALID_ISO_CURRENCIES.has(code);
+}
+
 const CURRENCY_SYMBOL_TO_ISO: Readonly<Record<string, string>> = {
   $: 'USD',
   '€': 'EUR',
@@ -90,9 +96,14 @@ export const canonicalDecimalSchema = z
 
 export const isoCurrencySchema = z
   .string()
-  .regex(ISO_CURRENCY_REGEX, 'Must be a 3-letter uppercase ISO currency code');
+  .regex(ISO_CURRENCY_REGEX, 'Must be a 3-letter uppercase ISO currency code')
+  .refine(isValidIsoCurrency, 'Must be a valid ISO-4217 currency code');
 
-export const stringValueSchema = z.string().min(1).max(MAX_STRING_VALUE_LENGTH);
+export const stringValueSchema = z
+  .string()
+  .min(1)
+  .max(MAX_STRING_VALUE_LENGTH)
+  .refine((s) => s.trim().length > 0, 'String value cannot be blank');
 
 export const dateValueSchema = z
   .string()
@@ -181,7 +192,8 @@ function mapCurrencyToken(raw: string): string | null {
     return fromSym;
   }
   if (/^[A-Za-z]{3}$/.test(trimmed)) {
-    return trimmed.toUpperCase();
+    const upper = trimmed.toUpperCase();
+    return isValidIsoCurrency(upper) ? upper : null;
   }
   return null;
 }
@@ -194,40 +206,52 @@ function parseMoneyString(raw: string, fallbackCurrency?: string): ParseTypedVal
 
   let body = trimmed;
   let negative = false;
+  let hasSign = false;
   let leadingCurrency: string | null = null;
   let trailingCurrency: string | null = null;
 
   // Handle trailing ISO code outside parentheses: "(1,234.00) USD"
   const outerTrailing = /^(\([^()]+\))\s+([A-Za-z]{3})$/.exec(body);
   if (outerTrailing?.[1] && outerTrailing[2]) {
+    const iso = outerTrailing[2].toUpperCase();
+    if (!isValidIsoCurrency(iso)) {
+      return { ok: false, error: `Invalid ISO currency code: "${outerTrailing[2]}"` };
+    }
     body = outerTrailing[1];
-    trailingCurrency = outerTrailing[2].toUpperCase();
+    trailingCurrency = iso;
   }
 
   // Handle accounting parentheses: "(1,234.00)", "($1,234.00)", "(1,234.00 USD)"
   if (body.startsWith('(') && body.endsWith(')')) {
     negative = true;
+    hasSign = true;
     body = body.slice(1, -1).trim();
   }
 
   // Optional leading ISO code: "USD $5,230.29" or "USD 5,230.29"
   const leadIso = /^([A-Za-z]{3})\s+(.+)$/.exec(body);
   if (leadIso?.[1] && leadIso[2]) {
-    leadingCurrency = leadIso[1].toUpperCase();
+    const iso = leadIso[1].toUpperCase();
+    if (!isValidIsoCurrency(iso)) {
+      return { ok: false, error: `Invalid ISO currency code: "${leadIso[1]}"` };
+    }
+    leadingCurrency = iso;
     body = leadIso[2].trim();
   }
 
   // Optional leading sign before symbol: "-$1,234.00" or "+$100"
   if (body.startsWith('-')) {
-    if (negative) {
-      return { ok: false, error: 'Conflicting negative signs in money value' };
-    }
-    negative = true;
-    body = body.slice(1).trim();
-  } else if (body.startsWith('+')) {
-    if (negative) {
+    if (hasSign) {
       return { ok: false, error: 'Conflicting signs in money value' };
     }
+    negative = true;
+    hasSign = true;
+    body = body.slice(1).trim();
+  } else if (body.startsWith('+')) {
+    if (hasSign) {
+      return { ok: false, error: 'Conflicting signs in money value' };
+    }
+    hasSign = true;
     body = body.slice(1).trim();
   }
 
@@ -244,22 +268,30 @@ function parseMoneyString(raw: string, fallbackCurrency?: string): ParseTypedVal
 
   // Optional sign after symbol: "$-1,234.00"
   if (body.startsWith('-')) {
-    if (negative) {
-      return { ok: false, error: 'Conflicting negative signs in money value' };
+    if (hasSign) {
+      return { ok: false, error: 'Conflicting signs in money value' };
     }
     negative = true;
     body = body.slice(1).trim();
   } else if (body.startsWith('+')) {
-    if (negative) {
+    if (hasSign) {
       return { ok: false, error: 'Conflicting signs in money value' };
     }
     body = body.slice(1).trim();
+  }
+
+  // Reject any remaining leading sign (e.g. "$-+100", "--100")
+  if (body.startsWith('-') || body.startsWith('+')) {
+    return { ok: false, error: 'Conflicting signs in money value' };
   }
 
   // Optional trailing ISO code inside: "5,230.29 USD"
   const trailIso = /^(.+?)\s+([A-Za-z]{3})$/.exec(body);
   if (trailIso?.[1] && trailIso[2]) {
     const iso = trailIso[2].toUpperCase();
+    if (!isValidIsoCurrency(iso)) {
+      return { ok: false, error: `Invalid ISO currency code: "${trailIso[2]}"` };
+    }
     if (trailingCurrency && trailingCurrency !== iso) {
       return { ok: false, error: 'Conflicting currency markers in money value' };
     }
@@ -283,7 +315,7 @@ function parseMoneyString(raw: string, fallbackCurrency?: string): ParseTypedVal
       : parsedNum;
 
   const currency = leadingCurrency ?? trailingCurrency ?? fallbackCurrency ?? 'USD';
-  if (!ISO_CURRENCY_REGEX.test(currency)) {
+  if (!isValidIsoCurrency(currency)) {
     return { ok: false, error: `Invalid ISO currency code: "${currency}"` };
   }
 
@@ -292,7 +324,7 @@ function parseMoneyString(raw: string, fallbackCurrency?: string): ParseTypedVal
 
 function parseMoneyInput(input: unknown, tpl?: TemplateValueContext): ParseTypedValueResult {
   const defaultCurrency = (tpl?.defaultCurrency ?? 'USD').trim().toUpperCase();
-  if (!ISO_CURRENCY_REGEX.test(defaultCurrency)) {
+  if (!isValidIsoCurrency(defaultCurrency)) {
     return { ok: false, error: `Invalid template defaultCurrency: "${defaultCurrency}"` };
   }
 

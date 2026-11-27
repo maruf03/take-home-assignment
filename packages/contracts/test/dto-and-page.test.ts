@@ -27,9 +27,17 @@ describe('Core forward-only Page and listQuery', () => {
         prevCursor: null,
       }).success,
     ).toBe(false);
+
+    expect(
+      pageMetaSchema.safeParse({
+        limit: 20,
+        hasMore: true,
+        nextCursor: '',
+      }).success,
+    ).toBe(false);
   });
 
-  it('defaults limit to 20, enforces 1..100, and caps cursor length', () => {
+  it('defaults limit to 20, enforces strict integer 1..100, and caps cursor length', () => {
     const q = listQuery();
     expect(q.parse({})).toEqual({ limit: 20 });
     expect(q.parse({ limit: '50', cursor: 'eyJ2IjoxfQ' })).toEqual({
@@ -38,6 +46,11 @@ describe('Core forward-only Page and listQuery', () => {
     });
     expect(q.safeParse({ limit: 0 }).success).toBe(false);
     expect(q.safeParse({ limit: 101 }).success).toBe(false);
+    expect(q.safeParse({ limit: '1e2' }).success).toBe(false);
+    expect(q.safeParse({ limit: '0x14' }).success).toBe(false);
+    expect(q.safeParse({ limit: '20.0' }).success).toBe(false);
+    expect(q.safeParse({ limit: '' }).success).toBe(false);
+    expect(q.safeParse({ limit: true }).success).toBe(false);
     expect(q.safeParse({ cursor: 'x'.repeat(513) }).success).toBe(false);
   });
 });
@@ -136,9 +149,23 @@ describe('Core DTO schemas (§7.4)', () => {
     expect(
       createReviewRequestSchema.safeParse({
         decision: 'correct',
-        correctedValue: { amount: '5230.1', currency: 'USD' },
+        correctedValue: { amount: '5230.10', currency: 'USD' },
       }).success,
     ).toBe(true);
+
+    expect(
+      createReviewRequestSchema.safeParse({
+        decision: 'correct',
+        correctedValue: { amount: '$5,230.10', currency: '' },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      createReviewRequestSchema.safeParse({
+        decision: 'correct',
+        correctedValue: '   ',
+      }).success,
+    ).toBe(false);
 
     expect(
       createReviewRequestSchema.safeParse({

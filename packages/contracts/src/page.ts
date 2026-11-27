@@ -10,7 +10,7 @@ export const pageMetaSchema = z
   .object({
     limit: z.number().int().min(MIN_PAGE_LIMIT).max(MAX_PAGE_LIMIT),
     hasMore: z.boolean(),
-    nextCursor: z.string().max(MAX_CURSOR_LENGTH).nullable(),
+    nextCursor: z.string().min(1).max(MAX_CURSOR_LENGTH).nullable(),
   })
   .strict();
 
@@ -30,11 +30,15 @@ export function pageSchema<TItem extends z.ZodType>(itemSchema: TItem) {
     .strict();
 }
 
-export const pageLimitQuerySchema = z.coerce
-  .number()
-  .int()
-  .min(MIN_PAGE_LIMIT)
-  .max(MAX_PAGE_LIMIT)
+export const pageLimitQuerySchema = z
+  .union([
+    z.number().int(),
+    z
+      .string()
+      .regex(/^[0-9]+$/, 'Limit must be a positive integer')
+      .transform((value) => Number(value)),
+  ])
+  .pipe(z.number().int().min(MIN_PAGE_LIMIT).max(MAX_PAGE_LIMIT))
   .default(DEFAULT_PAGE_LIMIT);
 
 export const pageCursorQuerySchema = z.string().min(1).max(MAX_CURSOR_LENGTH).optional();
