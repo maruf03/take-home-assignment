@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AppRoutes } from '../../src/app/App.js';
 import {
   DOC_ID_1,
+  makeProblem,
   makeSampleDocumentDetail,
   makeSampleDocumentSummary,
   server,
@@ -186,5 +187,22 @@ describe('Retry button, Re-extract, and Upload new version', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
+  });
+
+  it('surfaces Re-extract errors (409/429) in an accessible alert', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('/api/documents/:id/versions/:n/reextract', () =>
+        HttpResponse.json(makeProblem(409, 'VERSION_NOT_TERMINAL', 'In flight'), { status: 409 }),
+      ),
+    );
+
+    renderAt(`/documents/${DOC_ID_1}`);
+    const reextractBtn = await screen.findByRole('button', { name: /re-extract/i });
+    await user.click(reextractBtn);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /wait for the current extraction to finish/i,
+    );
   });
 });

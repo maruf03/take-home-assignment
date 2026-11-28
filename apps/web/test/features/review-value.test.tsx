@@ -179,6 +179,9 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
     expect(
       within(carriedRow).getByRole('button', { name: /change decision/i }),
     ).toBeInTheDocument();
+    // Critical #4: unchanged carried_over row with previous !== null must NOT show Changed comparison
+    expect(within(carriedRow).queryByText(/previous \(v1\)/i)).not.toBeInTheDocument();
+    expect(within(carriedRow).queryByText(/v1: Meridian Office Supplies/i)).not.toBeInTheDocument();
 
     const correctedRow = screen.getByRole('group', { name: 'Tax Rate' });
     expect(within(correctedRow).getByText('9.25%')).toBeInTheDocument();
@@ -299,6 +302,11 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
         expectedCurrentReviewId: null,
       });
     });
+    // Critical #1: saved correction must settle cleanly even when parsed text is cached (no TypeError rollback)
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Total Amount' })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     // 2. Date form: shows date in words ("Thu, 13 Nov 2025")
     const dateRow = screen.getByRole('group', { name: 'Issue Date' });
@@ -361,13 +369,13 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
     expect(await screen.findByRole('alert')).toHaveTextContent(/something went wrong/i);
   });
 
-  it('handles 409 REVIEW_CONFLICT by refetching detail and rendering an inline conflict card', async () => {
+  it('handles 409 REVIEW_CONFLICT by refetching detail, keeping ConflictCard visible even when value moves to Done, formatting reviewState, and preserving correction draft', async () => {
     const user = userEvent.setup();
     let detailFetches = 0;
     const base = makeSampleDocumentDetail();
     const conflictCurrentValue: ValueViewDto = {
       ...base.values.find((v) => v.id === VAL_CHANGED_ID)!,
-      reviewState: 'corrected',
+      reviewState: 'carried_over',
       attention: 'done',
       effectiveValue: { amount: '6000', currency: 'USD' },
       review: {
@@ -375,8 +383,8 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
         decision: 'correct',
         correctedValue: { amount: '6000', currency: 'USD' },
         note: 'Reviewed by another tab',
-        origin: 'human',
-        carriedFromVersion: null,
+        origin: 'carried',
+        carriedFromVersion: 1,
         createdAt: '2026-11-27T11:05:00.000Z',
       },
     };
@@ -384,6 +392,12 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
     server.use(
       http.get('/api/documents/:id', () => {
         detailFetches += 1;
+        if (detailFetches >= 2) {
+          return HttpResponse.json({
+            ...base,
+            values: base.values.map((v) => (v.id === VAL_CHANGED_ID ? conflictCurrentValue : v)),
+          });
+        }
         return HttpResponse.json(base);
       }),
       http.post('/api/values/:id/review', () =>
@@ -398,18 +412,114 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
 
     renderDetail();
     const changedRow = await screen.findByRole('group', { name: 'Total Amount' });
+    await user.click(within(changedRow).getByRole('button', { name: /^correct$/i }));
+    const amountInput = within(changedRow).getByLabelText(/amount/i);
+    await user.clear(amountInput);
+    await user.type(amountInput, '5888.88');
     const fetchesBefore = detailFetches;
 
-    await user.click(within(changedRow).getByRole('button', { name: /^approve$/i }));
+    await user.click(within(changedRow).getByRole('button', { name: /^save$/i }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/another review was saved first/i);
-    expect(screen.getByText(/\$6,000\.00/)).toBeInTheDocument();
     await waitFor(() => {
       expect(detailFetches).toBeGreaterThan(fetchesBefore);
     });
+    expect(await screen.findByRole('alert')).toHaveTextContent(/another review was saved first/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/carried over/i);
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/carried_over/);
+    expect(screen.getAllByText(/\$6,000\.00/).length).toBeGreaterThan(0);
+    const reloadedRow = screen.getByRole('group', { name: 'Total Amount' });
+    expect(within(reloadedRow).getByLabelText(/amount/i)).toHaveValue('5888.88');
   });
 
-  it('handles 409 VERSION_NOT_REVIEWABLE by showing a banner, refetching, and preserving correction draft', async () => {
+  it('rolls back only the failed value when two reviews run concurrently and clears 422 error on edit', async () => {
+    const user = userEvent.setup();
+    let releaseFirstFail!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirstFail = resolve;
+    });
+
+    server.use(
+      http.post('/api/values/:id/review', async ({ params, request }) => {
+        const body = (await request.json()) as { decision: 'approve' | 'correct' };
+        if (params['id'] === VAL_CHANGED_ID) {
+          if (body.decision === 'correct') {
+            return HttpResponse.json(
+              makeProblem(422, 'INVALID_CORRECTION', 'Amount out of range', {
+                errors: [{ path: 'correctedValue', message: 'Amount out of range' }],
+              }),
+              { status: 422 },
+            );
+          }
+          await firstGate;
+          return HttpResponse.json(makeProblem(500, 'INTERNAL', 'Transient fail'), { status: 500 });
+        }
+        const detail = makeSampleDocumentDetail();
+        const existing = detail.values.find((v) => v.id === params['id'])!;
+        return HttpResponse.json(
+          reviewResponseDtoSchema.parse({
+            value: {
+              ...existing,
+              reviewState: 'approved',
+              attention: 'done',
+              review: {
+                id: '01950000-0000-7000-8000-000000000909',
+                decision: 'approve',
+                correctedValue: null,
+                note: null,
+                origin: 'human',
+                carriedFromVersion: null,
+                createdAt: '2026-11-27T11:00:00.000Z',
+              },
+            },
+            progress: {
+              ...detail.progress,
+              pending: detail.progress.pending - 1,
+              approved: detail.progress.approved + 1,
+            },
+          }),
+          { status: 201 },
+        );
+      }),
+    );
+
+    renderDetail();
+    // Wait for parsed text too so cache has documents.text string
+    await screen.findByTestId('active-evidence-mark');
+
+    // First verify 422 INVALID_CORRECTION clears when editing input
+    const moneyRow = screen.getByRole('group', { name: 'Total Amount' });
+    await user.click(within(moneyRow).getByRole('button', { name: /^correct$/i }));
+    await user.click(within(moneyRow).getByRole('button', { name: /^save$/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/amount out of range/i);
+    await user.type(within(moneyRow).getByLabelText(/note/i), 'x');
+    await waitFor(() => {
+      expect(screen.queryByText(/amount out of range/i)).not.toBeInTheDocument();
+    });
+    await user.click(within(moneyRow).getByRole('button', { name: /^cancel$/i }));
+
+    // Now approve Total Amount (in-flight -> will fail 500) and concurrently Confirm not present on Invoice Number (succeeds 201)
+    await user.click(
+      within(screen.getByRole('group', { name: 'Total Amount' })).getByRole('button', {
+        name: /^approve$/i,
+      }),
+    );
+    await user.click(
+      within(screen.getByRole('group', { name: 'Invoice Number' })).getByRole('button', {
+        name: /confirm not present/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Invoice Number' })).not.toBeInTheDocument();
+    });
+
+    // Release Total Amount failure -> ONLY Total Amount rolls back; Invoice Number stays Done!
+    releaseFirstFail();
+    expect(await screen.findByRole('group', { name: 'Total Amount' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Invoice Number' })).not.toBeInTheDocument();
+  });
+
+  it('handles 409 VERSION_NOT_REVIEWABLE by showing a banner, refetching, and preserving correction draft even when field is in Done', async () => {
     const user = userEvent.setup();
     let versionNum = 2;
 
@@ -420,6 +530,19 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
           ...base,
           valuesVersion: versionNum,
           currentVersion: { ...base.currentVersion, number: versionNum },
+          values:
+            versionNum === 3
+              ? base.values.map((v) =>
+                  v.id === VAL_CHANGED_ID
+                    ? {
+                        ...v,
+                        id: '01950000-0000-7000-8000-000000000999',
+                        attention: 'done',
+                        reviewState: 'carried_over',
+                      }
+                    : v,
+                )
+              : base.values,
         });
       }),
       http.post('/api/values/:id/review', () => {
@@ -440,7 +563,6 @@ describe('Review value actions, states, flags, correction forms, and optimistic 
     await user.click(within(moneyRow).getByRole('button', { name: /^save$/i }));
 
     expect(await screen.findByText(/a newer version became reviewable/i)).toBeInTheDocument();
-    // Draft input remains open with the typed value preserved on the reloaded version
     await waitFor(() => {
       const updatedRow = screen.getByRole('group', { name: 'Total Amount' });
       expect(within(updatedRow).getByLabelText(/amount/i)).toHaveValue('6123.45');

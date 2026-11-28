@@ -11,6 +11,7 @@ import {
 import type { Page } from '@app/contracts/page';
 import type { TypedValue } from '@app/contracts/values';
 import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { useState } from 'react';
 import { api, ApiError } from '../../shared/api/client.js';
 import { queryKeys } from '../../shared/api/query-keys.js';
 
@@ -22,24 +23,41 @@ export interface ReviewMutationVariables {
   readonly optimisticCorrectedValue?: TypedValue;
 }
 
-function decrementBucket(progress: Progress, state: ValueViewDto['reviewState']): Progress {
-  switch (state) {
-    case 'pending':
-      return { ...progress, pending: Math.max(0, progress.pending - 1) };
-    case 'approved':
-      return { ...progress, approved: Math.max(0, progress.approved - 1) };
-    case 'corrected':
-      return { ...progress, corrected: Math.max(0, progress.corrected - 1) };
-    case 'carried_over':
-      return { ...progress, carriedOver: Math.max(0, progress.carriedOver - 1) };
+export function recomputeProgress(
+  values: readonly ValueViewDto[],
+  versionNumber: number | null,
+): Progress {
+  let pending = 0;
+  let approved = 0;
+  let corrected = 0;
+  let carriedOver = 0;
+  let gaps = 0;
+  for (const v of values) {
+    if (v.kind === 'gap') gaps += 1;
+    switch (v.reviewState) {
+      case 'pending':
+        pending += 1;
+        break;
+      case 'approved':
+        approved += 1;
+        break;
+      case 'corrected':
+        corrected += 1;
+        break;
+      case 'carried_over':
+        carriedOver += 1;
+        break;
+    }
   }
-}
-
-function incrementBucket(progress: Progress, decision: 'approve' | 'correct'): Progress {
-  if (decision === 'approve') {
-    return { ...progress, approved: progress.approved + 1 };
-  }
-  return { ...progress, corrected: progress.corrected + 1 };
+  return {
+    versionNumber,
+    pending,
+    approved,
+    corrected,
+    carriedOver,
+    total: values.length,
+    gaps,
+  };
 }
 
 /**
@@ -65,28 +83,28 @@ export function applyOptimisticReview(
     reviewState: nextState,
     attention: 'done',
     effectiveValue: nextEffective,
-    review: {
-      id: existing.review?.id ?? '01950000-0000-7000-8000-000000000000',
-      decision: variables.body.decision,
-      correctedValue:
-        variables.body.decision === 'correct' && variables.optimisticCorrectedValue !== undefined
-          ? variables.optimisticCorrectedValue
-          : null,
-      note: variables.body.note ?? null,
-      origin: 'human',
-      carriedFromVersion: null,
-      createdAt: new Date().toISOString(),
-    },
+    review: existing.review
+      ? {
+          ...existing.review,
+          decision: variables.body.decision,
+          correctedValue:
+            variables.body.decision === 'correct' &&
+            variables.optimisticCorrectedValue !== undefined
+              ? variables.optimisticCorrectedValue
+              : null,
+          note: variables.body.note ?? null,
+          origin: 'human',
+          carriedFromVersion: null,
+        }
+      : null,
   };
 
-  const nextProgress = incrementBucket(
-    decrementBucket(doc.progress, existing.reviewState),
-    variables.body.decision,
-  );
+  const nextValues = doc.values.map((v) => (v.id === variables.valueId ? updatedValue : v));
+  const nextProgress = recomputeProgress(nextValues, doc.progress.versionNumber);
 
   return {
     ...doc,
-    values: doc.values.map((v) => (v.id === variables.valueId ? updatedValue : v)),
+    values: nextValues,
     progress: nextProgress,
     needsReview: nextProgress.pending > 0,
   };
@@ -106,12 +124,13 @@ export interface UseReviewValueCallbacks {
 
 export function useReviewValue(documentId: string, callbacks: UseReviewValueCallbacks = {}) {
   const queryClient = useQueryClient();
+  const [pendingValueIds, setPendingValueIds] = useState<ReadonlySet<string>>(() => new Set());
 
-  return useMutation<
+  const mutation = useMutation<
     ReviewResponseDto,
     Error,
     ReviewMutationVariables,
-    { previousDetail?: DocumentDetailDto }
+    { previousValue?: ValueViewDto }
   >({
     mutationFn: (variables) =>
       api.post(
@@ -120,34 +139,46 @@ export function useReviewValue(documentId: string, callbacks: UseReviewValueCall
         reviewResponseDtoSchema,
       ),
     onMutate: async (variables) => {
+      setPendingValueIds((prev) => {
+        const next = new Set(prev);
+        next.add(variables.valueId);
+        return next;
+      });
       const detailKey = queryKeys.documents.detail(documentId);
       await queryClient.cancelQueries({ queryKey: detailKey });
-      const previousDetail = queryClient.getQueryData<DocumentDetailDto>(detailKey);
-      if (previousDetail) {
+      const currentDetail = queryClient.getQueryData<DocumentDetailDto>(detailKey);
+      const previousValue = currentDetail?.values.find((v) => v.id === variables.valueId);
+      if (currentDetail && previousValue) {
         queryClient.setQueryData<DocumentDetailDto>(
           detailKey,
-          applyOptimisticReview(previousDetail, variables),
+          applyOptimisticReview(currentDetail, variables),
         );
       }
-      return { previousDetail };
+      return { previousValue };
     },
     onSuccess: (response) => {
       const detailKey = queryKeys.documents.detail(documentId);
       queryClient.setQueryData<DocumentDetailDto>(detailKey, (current) => {
         if (!current) return current;
+        const nextValues = current.values.map((v) =>
+          v.id === response.value.id ? response.value : v,
+        );
         return {
           ...current,
-          values: current.values.map((v) => (v.id === response.value.id ? response.value : v)),
+          values: nextValues,
           progress: response.progress,
           needsReview: response.progress.pending > 0,
         };
       });
 
-      // Patch matching document rows across cached list queries (spec §14.6).
+      // Patch matching document rows across cached list queries only (never text/detail queries).
       queryClient.setQueriesData<InfiniteData<Page<DocumentSummaryDto>>>(
-        { queryKey: queryKeys.documents.all() },
+        {
+          queryKey: queryKeys.documents.all(),
+          predicate: (q) => q.queryKey[1] === 'list',
+        },
         (old) => {
-          if (!old || !('pages' in old)) return old;
+          if (!old || typeof old !== 'object' || !('pages' in old)) return old;
           return {
             ...old,
             pages: old.pages.map((page) => ({
@@ -168,13 +199,28 @@ export function useReviewValue(documentId: string, callbacks: UseReviewValueCall
     },
     onError: (err, variables, context) => {
       const detailKey = queryKeys.documents.detail(documentId);
-      if (context?.previousDetail) {
-        queryClient.setQueryData(detailKey, context.previousDetail);
+      // Roll back ONLY the failed value so concurrent reviews on sibling rows are never clobbered.
+      if (context?.previousValue) {
+        const rollbackVal = context.previousValue;
+        queryClient.setQueryData<DocumentDetailDto>(detailKey, (current) => {
+          if (!current) return current;
+          const nextValues = current.values.map((v) =>
+            v.id === variables.valueId ? rollbackVal : v,
+          );
+          const nextProgress = recomputeProgress(nextValues, current.progress.versionNumber);
+          return {
+            ...current,
+            values: nextValues,
+            progress: nextProgress,
+            needsReview: nextProgress.pending > 0,
+          };
+        });
       }
 
       if (err instanceof ApiError && err.status === 409) {
         if (err.code === 'REVIEW_CONFLICT') {
-          callbacks.onReviewConflict?.(variables.valueId, extractConflictValue(err));
+          const conflictVal = extractConflictValue(err);
+          callbacks.onReviewConflict?.(variables.valueId, conflictVal);
           void queryClient.invalidateQueries({ queryKey: detailKey });
         } else if (err.code === 'VERSION_NOT_REVIEWABLE') {
           callbacks.onVersionNotReviewable?.();
@@ -182,7 +228,13 @@ export function useReviewValue(documentId: string, callbacks: UseReviewValueCall
         }
       }
     },
-    onSettled: () => {
+    onSettled: (_data, _err, variables) => {
+      setPendingValueIds((prev) => {
+        if (!prev.has(variables.valueId)) return prev;
+        const next = new Set(prev);
+        next.delete(variables.valueId);
+        return next;
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.documents.facets() });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.documents.all(),
@@ -190,4 +242,9 @@ export function useReviewValue(documentId: string, callbacks: UseReviewValueCall
       });
     },
   });
+
+  return {
+    ...mutation,
+    pendingValueIds,
+  };
 }

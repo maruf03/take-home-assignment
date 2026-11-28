@@ -116,7 +116,7 @@ function DocumentDetailContent({
   const isHistorical = requestedVersion !== null;
 
   const detailQuery = useDocumentDetail(documentId, pollMs);
-  const versionQuery = useVersionDetail(documentId, isHistorical ? requestedVersion : null);
+  const versionQuery = useVersionDetail(documentId, isHistorical ? requestedVersion : null, pollMs);
   const typesQuery = useDocumentTypes();
 
   const doc = detailQuery.data;
@@ -173,12 +173,30 @@ function DocumentDetailContent({
   const reviewMutation = useReviewValue(documentId, {
     onReviewConflict: (valueId, currentValue) => {
       setConflictsByValueId((prev) => ({ ...prev, [valueId]: currentValue }));
+      // Auto-expand Done so ConflictCard remains visible when the refetched value moves to Done.
+      setDoneExpanded(true);
     },
     onVersionNotReviewable: () => {
       setVersionMovedBanner(true);
     },
   });
   const reextractMutation = useReextractVersion(documentId);
+
+  // If an open draft's field moved into Done (e.g., after VERSION_NOT_REVIEWABLE reload), keep it visible.
+  useEffect(() => {
+    if (!editingFieldKey) return;
+    const match = values.find((v) => v.fieldKey === editingFieldKey);
+    if (!match) {
+      setEditingFieldKey(null);
+      return;
+    }
+    if (match.attention === 'done') {
+      setDoneExpanded(true);
+    }
+    if (selectedValueId !== match.id) {
+      setSelectedValueId(match.id);
+    }
+  }, [editingFieldKey, values, selectedValueId]);
 
   // Announce completion politely when extraction transitions from in-flight to extracted (spec §14.4).
   const wasInFlightRef = useRef(false);
@@ -202,20 +220,20 @@ function DocumentDetailContent({
     return orderedValues.find((v) => v.evidence !== null) ?? orderedValues[0] ?? null;
   }, [orderedValues, selectedValueId]);
 
-  const focusNextPendingAfter = (approvedValueId: string) => {
-    const nextPending = orderedValues.find(
-      (v) => v.id !== approvedValueId && v.reviewState === 'pending',
-    );
-    if (!nextPending) return;
-    setSelectedValueId(nextPending.id);
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => {
-        const nextRow = document.querySelector<HTMLElement>(
-          `[data-value-id="${nextPending.id}"] [data-review-primary="true"]`,
-        );
-        nextRow?.focus();
-      });
-    }
+  const focusNextPendingAfter = () => {
+    if (typeof requestAnimationFrame !== 'function') return;
+    requestAnimationFrame(() => {
+      const nextBtn = document.querySelector<HTMLElement>('[data-review-primary="true"]');
+      if (nextBtn) {
+        const nextRow = nextBtn.closest<HTMLElement>('[data-value-id]');
+        const nextId = nextRow?.dataset['valueId'];
+        if (nextId) setSelectedValueId(nextId);
+        nextBtn.focus();
+        return;
+      }
+      const doneToggle = document.querySelector<HTMLElement>('[data-done-toggle="true"]');
+      doneToggle?.focus();
+    });
   };
 
   const handleApprove = (val: ValueViewDto) => {
@@ -242,7 +260,7 @@ function DocumentDetailContent({
       {
         onSuccess: () => {
           setLiveNotice(`Approved ${val.label}`);
-          focusNextPendingAfter(val.id);
+          focusNextPendingAfter();
         },
         onError: (err) => {
           if (
@@ -464,6 +482,29 @@ function DocumentDetailContent({
         {liveNotice ?? ''}
       </div>
 
+      {/* Re-extract error alert if header Re-extract action failed */}
+      {reextractMutation.error ? (
+        <div className="mt-3">
+          <Banner tone="gap" live="assertive">
+            <span>
+              {reextractMutation.error instanceof ApiError
+                ? reextractMutation.error.status === 429 &&
+                  reextractMutation.error.retryAfterSeconds !== undefined
+                  ? `Wait ${reextractMutation.error.retryAfterSeconds}s before re-extracting.`
+                  : getUiCopy(`problem.${reextractMutation.error.code}`)
+                : reextractMutation.error.message}
+            </span>
+            <button
+              type="button"
+              onClick={() => reextractMutation.reset()}
+              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-ink)]"
+            >
+              Dismiss
+            </button>
+          </Banner>
+        </div>
+      ) : null}
+
       {/* Priority banner: at most one (spec §14.2) */}
       <div className="mt-4 space-y-3">
         {versionMovedBanner ? (
@@ -596,6 +637,7 @@ function DocumentDetailContent({
                     {isDone ? (
                       <button
                         type="button"
+                        data-done-toggle="true"
                         aria-expanded={doneExpanded}
                         onClick={() => setDoneExpanded((prev) => !prev)}
                         className="inline-flex min-h-7 items-center rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-subtle)]"
@@ -630,10 +672,7 @@ function DocumentDetailContent({
                                 value={item}
                                 readOnly={isHistorical}
                                 editing={isEditing}
-                                busy={
-                                  reviewMutation.isPending &&
-                                  reviewMutation.variables?.valueId === item.id
-                                }
+                                busy={reviewMutation.pendingValueIds.has(item.id)}
                                 onApprove={() => handleApprove(item)}
                                 onStartEdit={() => handleStartEdit(item)}
                               />
@@ -673,17 +712,21 @@ function DocumentDetailContent({
                                   value={item}
                                   templateCtx={templateCtx}
                                   draft={activeDraft}
-                                  onDraftChange={(next) =>
+                                  onDraftChange={(next) => {
                                     setDraftsByField((prev) => ({
                                       ...prev,
                                       [item.fieldKey]: next,
-                                    }))
-                                  }
+                                    }));
+                                    if (rowErrorByValueId[item.id]) {
+                                      setRowErrorByValueId((prev) => {
+                                        const updated = { ...prev };
+                                        delete updated[item.id];
+                                        return updated;
+                                      });
+                                    }
+                                  }}
                                   onCancel={() => handleCancelEdit(item.fieldKey)}
-                                  submitting={
-                                    reviewMutation.isPending &&
-                                    reviewMutation.variables?.valueId === item.id
-                                  }
+                                  submitting={reviewMutation.pendingValueIds.has(item.id)}
                                   serverError={rowError}
                                   onSubmit={async ({ correctedValue, canonicalValue, note }) => {
                                     setRowErrorByValueId((prev) => {
@@ -705,6 +748,7 @@ function DocumentDetailContent({
                                       });
                                       handleCancelEdit(item.fieldKey);
                                       setLiveNotice(`Corrected ${item.label}`);
+                                      focusNextPendingAfter();
                                     } catch (err) {
                                       if (
                                         err instanceof ApiError &&
@@ -712,10 +756,7 @@ function DocumentDetailContent({
                                         (err.code === 'REVIEW_CONFLICT' ||
                                           err.code === 'VERSION_NOT_REVIEWABLE')
                                       ) {
-                                        // Conflict card or version-moved banner handles this; preserve draft on VERSION_NOT_REVIEWABLE.
-                                        if (err.code === 'REVIEW_CONFLICT') {
-                                          handleCancelEdit(item.fieldKey);
-                                        }
+                                        // Preserve the reviewer's draft on both REVIEW_CONFLICT and VERSION_NOT_REVIEWABLE.
                                         return;
                                       }
                                       if (err instanceof Error) {

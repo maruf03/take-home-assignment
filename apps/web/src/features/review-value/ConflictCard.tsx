@@ -7,6 +7,19 @@ export interface ConflictCardProps {
   readonly onDismiss: () => void;
 }
 
+function formatReviewState(state: ValueViewDto['reviewState']): string {
+  switch (state) {
+    case 'pending':
+      return 'Pending';
+    case 'approved':
+      return 'Approved';
+    case 'corrected':
+      return 'Corrected';
+    case 'carried_over':
+      return 'Carried over';
+  }
+}
+
 export function ConflictCard({ currentValue, onDismiss }: ConflictCardProps) {
   const latestFormatted =
     currentValue && currentValue.effectiveValue !== null
@@ -25,7 +38,8 @@ export function ConflictCard({ currentValue, onDismiss }: ConflictCardProps) {
           </p>
           {currentValue ? (
             <p className="mt-1 text-[var(--color-ink)]">
-              Latest saved state: <span className="font-semibold">{currentValue.reviewState}</span>
+              Latest saved state:{' '}
+              <span className="font-semibold">{formatReviewState(currentValue.reviewState)}</span>
               {latestFormatted ? (
                 <>
                   {' '}

@@ -164,7 +164,7 @@ export function CorrectionForm({
               inputMode="decimal"
               value={draft.rawValue}
               onChange={(e) => onDraftChange({ ...draft, rawValue: e.target.value })}
-              placeholder="$5,230.29"
+              placeholder="5,230.29"
               className="mt-1 block w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-ink)]"
             />
           </div>

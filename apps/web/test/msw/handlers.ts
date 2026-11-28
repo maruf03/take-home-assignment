@@ -187,7 +187,25 @@ export function makeSampleDocumentDetail(
           carriedFromVersion: 1,
           createdAt: '2026-11-27T10:00:05.000Z',
         },
-        previous: null,
+        // Realistic backend behavior: unchanged carried_over rows still carry previous from v1.
+        previous: {
+          versionNumber: 1,
+          valueId: '01950000-0000-7000-8000-000000000091',
+          kind: 'value',
+          value: 'Meridian Office Supplies',
+          effectiveValue: 'Meridian Office Supplies',
+          evidence: { quote: 'Vendor: Meridian Office Supplies', line: 1 },
+          gap: null,
+          review: {
+            id: '01950000-0000-7000-8000-000000000291',
+            decision: 'approve',
+            correctedValue: null,
+            note: null,
+            origin: 'human',
+            carriedFromVersion: null,
+            createdAt: '2026-11-27T09:05:00.000Z',
+          },
+        },
         reviewable: true,
       },
       {

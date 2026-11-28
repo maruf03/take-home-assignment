@@ -74,7 +74,11 @@ export function UploadVersionDialog({
             id="upload-version-pdf-file"
             type="file"
             accept=".pdf,application/pdf"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setLocalError(null);
+              mutation.reset();
+            }}
             className="mt-1 block w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2 text-sm text-[var(--color-ink)]"
           />
           <p className="mt-1 text-xs text-[var(--color-ink-muted)]">

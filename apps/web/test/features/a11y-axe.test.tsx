@@ -106,11 +106,27 @@ describe('Accessibility (axe-core) across UI states', () => {
     const moneyRow = await screen.findByRole('group', { name: 'Total Amount' });
     await expectZeroSeriousAxeViolations(container);
 
-    // Open inline CorrectionForm
+    // Open inline CorrectionForm + validation error state
     await user.click(within(moneyRow).getByRole('button', { name: /^correct$/i }));
-    await within(moneyRow).findByLabelText(/amount/i);
+    const amountInput = await within(moneyRow).findByLabelText(/amount/i);
+    await user.clear(amountInput);
+    await user.click(within(moneyRow).getByRole('button', { name: /^save$/i }));
     await expectZeroSeriousAxeViolations(container);
     await user.click(within(moneyRow).getByRole('button', { name: /^cancel$/i }));
+
+    // Open Date CorrectionForm + expanded Done group + UploadVersionDialog
+    const dateRow = screen.getByRole('group', { name: 'Issue Date' });
+    await user.click(within(dateRow).getByRole('button', { name: /^correct$/i }));
+    await expectZeroSeriousAxeViolations(container);
+    await user.click(within(dateRow).getByRole('button', { name: /^cancel$/i }));
+
+    await user.click(screen.getByRole('button', { name: /show done/i }));
+    await expectZeroSeriousAxeViolations(container);
+
+    await user.click(screen.getByRole('button', { name: /upload new version/i }));
+    await screen.findByRole('dialog', { name: /upload new version/i });
+    await expectZeroSeriousAxeViolations(container);
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
 
     // Trigger REVIEW_CONFLICT inline card
     server.use(

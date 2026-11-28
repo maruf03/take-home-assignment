@@ -63,7 +63,7 @@ export function ValueRow({ value, selected, onSelect, actions, editor, conflict 
 
   const evidenceDescId = value.evidence ? `evidence-desc-${value.id}` : undefined;
   const previous = value.previous;
-  const showChangedComparison = previous !== null;
+  const showChangedComparison = value.changeKind === 'changed' && previous !== null;
   const tokenDiff =
     showChangedComparison && previous.evidence && value.evidence
       ? diffTokens(previous.evidence.quote, value.evidence.quote)
@@ -111,7 +111,7 @@ export function ValueRow({ value, selected, onSelect, actions, editor, conflict 
                 {extractedText}
               </span>
             ) : null}
-            {previous?.effectiveValue != null ? (
+            {showChangedComparison && previous.effectiveValue != null ? (
               <span className="tabular-nums text-xs text-[var(--color-ink-muted)] line-through">
                 v{previous.versionNumber}:{' '}
                 {formatTypedValue(value.fieldType, previous.effectiveValue)}
