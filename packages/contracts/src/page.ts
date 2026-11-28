@@ -48,11 +48,8 @@ export const baseListQueryShape = {
   cursor: pageCursorQuerySchema,
 } as const;
 
-export function listQuery<TShape extends z.ZodRawShape = Record<string, never>>(filters?: TShape) {
-  if (!filters) {
-    return z.object(baseListQueryShape).strict();
-  }
-  return z.object({ ...baseListQueryShape, ...filters }).strict();
+export function listQuery<TShape extends z.ZodRawShape = Record<never, never>>(filters?: TShape) {
+  return z.object({ ...baseListQueryShape, ...(filters ?? ({} as TShape)) }).strict();
 }
 
 export const cursorPayloadSchema = z

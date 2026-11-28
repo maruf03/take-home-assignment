@@ -65,6 +65,61 @@ export async function computeVersionProgress(
 }
 
 /**
+ * Batched progress calculation for multiple versions in a single GROUP BY query (avoids N+1).
+ */
+export async function computeVersionsProgress(
+  tx: DbTx,
+  versions: ReadonlyArray<{ id: string; versionNumber: number }>,
+): Promise<Map<string, Progress>> {
+  const result = new Map<string, Progress>();
+  if (versions.length === 0) {
+    return result;
+  }
+  const uniqueIds = [...new Set(versions.map((v) => v.id))];
+  const idList = sql.join(
+    uniqueIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const res = await tx.execute<{
+    version_id: string;
+    total: number;
+    gaps: number;
+    pending: number;
+    approved: number;
+    corrected: number;
+    carried_over: number;
+  }>(sql`
+    SELECT
+      v.version_id,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE v.kind = 'gap')::int AS gaps,
+      COUNT(*) FILTER (WHERE v.current_review_id IS NULL OR r.decision = 'revert')::int AS pending,
+      COUNT(*) FILTER (WHERE v.current_review_id IS NOT NULL AND r.origin = 'human' AND r.decision = 'approve')::int AS approved,
+      COUNT(*) FILTER (WHERE v.current_review_id IS NOT NULL AND r.origin = 'human' AND r.decision = 'correct')::int AS corrected,
+      COUNT(*) FILTER (WHERE v.current_review_id IS NOT NULL AND r.origin = 'carried' AND r.decision <> 'revert')::int AS carried_over
+    FROM extracted_values v
+    LEFT JOIN reviews r ON r.id = v.current_review_id
+    WHERE v.version_id IN (${idList})
+    GROUP BY v.version_id
+  `);
+
+  const byVersionId = new Map(res.rows.map((row) => [row.version_id, row]));
+  for (const v of versions) {
+    const row = byVersionId.get(v.id);
+    result.set(v.id, {
+      versionNumber: v.versionNumber,
+      total: row?.total ?? 0,
+      gaps: row?.gaps ?? 0,
+      pending: row?.pending ?? 0,
+      approved: row?.approved ?? 0,
+      corrected: row?.corrected ?? 0,
+      carriedOver: row?.carried_over ?? 0,
+    });
+  }
+  return result;
+}
+
+/**
  * Follows spec §3 Review lock order strictly:
  * 1. Read immutable (version_id, document_id, version_number) without locking
  * 2. Lock documents FOR NO KEY UPDATE (404 if missing, 410 if deleted)
