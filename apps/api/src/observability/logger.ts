@@ -3,26 +3,47 @@ import pino from 'pino';
 import type { Options as PinoHttpOptions } from 'pino-http';
 import type { ApiConfig } from '../config.js';
 
-/** Spec §8 & §9: redact credentials, keys, prompts, parsed text, and raw LLM responses. */
+const SENSITIVE_KEYS = [
+  'GEMINI_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'S3_SECRET_KEY',
+  'S3_ACCESS_KEY',
+  'DATABASE_URL',
+  'REDIS_URL',
+  'apiKey',
+  'password',
+  'secret',
+  'prompt',
+  'parsedText',
+  'parsed_text',
+  'rawResponse',
+  'raw_response',
+  'request',
+  'note',
+  'correctedValue',
+  'originalFilename',
+  'filename',
+] as const;
+
+/**
+ * Spec §8 & §9: redact credentials, keys, prompts, parsed text, filenames, notes, and raw LLM
+ * payloads across top-level, multi-depth nested, error, and array paths.
+ */
 export const API_LOG_REDACT_PATHS: string[] = [
   'req.headers.authorization',
   'req.headers.cookie',
   'req.headers["x-api-key"]',
   'res.headers["set-cookie"]',
-  '*.GEMINI_API_KEY',
-  '*.ANTHROPIC_API_KEY',
-  'GEMINI_API_KEY',
-  'ANTHROPIC_API_KEY',
-  '*.apiKey',
-  '*.password',
-  '*.secret',
-  '*.prompt',
-  'prompt',
-  '*.parsedText',
-  'parsedText',
-  '*.rawResponse',
-  'rawResponse',
-  '*.note',
+  ...SENSITIVE_KEYS.flatMap((key) => [
+    key,
+    `*.${key}`,
+    `*.*.${key}`,
+    `*.*.*.${key}`,
+    `*[*].${key}`,
+    `err.${key}`,
+    `err.*.${key}`,
+    `err.config.${key}`,
+  ]),
 ];
 
 export interface CreateApiPinoLoggerOptions {

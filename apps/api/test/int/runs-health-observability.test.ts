@@ -138,12 +138,29 @@ describe('API Task 10: runs, DEBUG_ENDPOINTS gating, health, metrics, Swagger, n
     expect(runsPage.data[0]!.correlationId).toBe('req-trace-123');
     expect(runsPage.data[0]!.llmCallCount).toBe(1);
 
-    // Default DEBUG_ENDPOINTS=false -> 404 ROUTE_NOT_FOUND
+    // Default DEBUG_ENDPOINTS=false -> 404 ROUTE_NOT_FOUND even with invalid UUID/query params (guard runs before pipes)
     const callsDisabledRes = await fetch(
       `${h.baseUrl}/documents/${docId}/versions/1/runs/${runId}/calls`,
     );
     expect(callsDisabledRes.status).toBe(404);
     expect(problemDetailsSchema.parse(await callsDisabledRes.json()).code).toBe('ROUTE_NOT_FOUND');
+
+    const callsDisabledBadParamsRes = await fetch(
+      `${h.baseUrl}/documents/not-a-uuid/versions/bad/runs/not-a-uuid/calls?kind=invalid`,
+    );
+    expect(callsDisabledBadParamsRes.status).toBe(404);
+    expect(problemDetailsSchema.parse(await callsDisabledBadParamsRes.json()).code).toBe(
+      'ROUTE_NOT_FOUND',
+    );
+
+    // Weak ETag W/"..." and * revalidation on /text returns 304 (RFC 9110 §13.1.2)
+    const textRes = await fetch(`${h.baseUrl}/documents/${docId}/versions/1/text`);
+    expect(textRes.status).toBe(200);
+    const strongEtag = textRes.headers.get('etag')!;
+    const weak304 = await fetch(`${h.baseUrl}/documents/${docId}/versions/1/text`, {
+      headers: { 'if-none-match': `W/${strongEtag}` },
+    });
+    expect(weak304.status).toBe(304);
 
     // Boot a separate harness with DEBUG_ENDPOINTS=true on the same template DB
     const debugHarness = await createApiTestHarness({
@@ -221,18 +238,21 @@ describe('API Task 10: runs, DEBUG_ENDPOINTS gating, health, metrics, Swagger, n
     expect(metricsText).toContain('http_request_duration_seconds');
     expect(metricsText).toMatch(/documents_uploaded_total\{type="invoice"\}\s+[1-9]/);
 
-    // Swagger JSON & UI are served at /docs-json and /docs
+    // Swagger JSON & UI are served at /docs-json and /docs with accurate status codes (202 on retry)
     const docsJsonRes = await fetch(`${h.baseUrl}/docs-json`);
     expect(docsJsonRes.status).toBe(200);
     const spec = (await docsJsonRes.json()) as {
       openapi: string;
-      paths: Record<string, unknown>;
+      paths: Record<string, Record<string, { responses?: Record<string, unknown> }>>;
     };
     expect(spec.openapi).toMatch(/^3\./);
     expect(spec.paths['/documents']).toBeDefined();
     expect(spec.paths['/documents/facets']).toBeDefined();
     expect(spec.paths['/documents/{id}/versions/{n}/runs']).toBeDefined();
     expect(spec.paths['/health/ready']).toBeDefined();
+    expect(
+      spec.paths['/documents/{id}/versions/{n}/retry']?.['post']?.responses?.['202'],
+    ).toBeDefined();
 
     // DB down -> 503 unhealthy (spec §7.5)
     const brokenDbApp = await createApiTestHarness({
@@ -255,7 +275,7 @@ describe('API Task 10: runs, DEBUG_ENDPOINTS gating, health, metrics, Swagger, n
     }
   });
 
-  it('ships hardened infra/nginx/nginx.conf with SPA CSP, tmpfs temp paths, 11m limit, proxy_buffering off on /file, and rate limits', async () => {
+  it('ships hardened infra/nginx/nginx.conf with SPA CSP (scoped to SPA only), gzip off on /api, $remote_addr XFF, POST-only upload limit, tmpfs temp paths, and 11m limit', async () => {
     const nginxConf = await readFile(path.join(REPO_ROOT, 'infra', 'nginx', 'nginx.conf'), 'utf8');
     expect(nginxConf).toContain("default-src 'self'");
     expect(nginxConf).toContain("frame-ancestors 'none'");
@@ -267,5 +287,18 @@ describe('API Task 10: runs, DEBUG_ENDPOINTS gating, health, metrics, Swagger, n
     expect(nginxConf).toContain('proxy_buffering off');
     expect(nginxConf).toContain('limit_req');
     expect(nginxConf).toContain('limit_conn');
+    // Must disable gzip on /api/ so strong ETags pass through unchanged
+    expect(nginxConf).toContain('gzip off;');
+    // Must not use $proxy_add_x_forwarded_for (prevents spoofing through Docker bridge 172.30.0.1)
+    expect(nginxConf).not.toContain('$proxy_add_x_forwarded_for');
+    expect(nginxConf).toContain('proxy_set_header X-Forwarded-For $remote_addr;');
+    // Must scope api_upload rate limit to POST via map $request_method
+    expect(nginxConf).toContain('map $request_method $upload_limit_key');
+    // Server block must not set server-level add_header before first location (would leak SPA CSP onto /api/)
+    const serverHeaderSection = nginxConf.slice(
+      nginxConf.indexOf('server {'),
+      nginxConf.indexOf('location ~ ^/api/'),
+    );
+    expect(serverHeaderSection).not.toContain('add_header');
   });
 });

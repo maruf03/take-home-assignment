@@ -14,18 +14,22 @@ export class ProblemFilter implements ExceptionFilter {
     const mapped = mapExceptionToProblem(exception);
 
     if (mapped.unexpected) {
-      // Never log request bodies, prompts or parsed text: message + stack only.
+      // Structured log so pino object redaction covers error fields; never logs bodies/prompts.
       this.logger.error(
-        `Unhandled error on ${req.method} ${req.path} [${req.requestId ?? '-'}]: ${
-          exception instanceof Error ? (exception.stack ?? exception.message) : String(exception)
-        }`,
+        {
+          err: exception instanceof Error ? exception : new Error(String(exception)),
+          requestId: req.requestId ?? '-',
+          method: req.method,
+          path: req.path,
+        },
+        'Unhandled API error',
       );
     }
     if (res.headersSent) {
       res.end();
       return;
     }
-    if (mapped.status === 503 || mapped.status === 429) {
+    if ((mapped.status === 503 || mapped.status === 429) && !res.getHeader('Retry-After')) {
       res.setHeader('Retry-After', '5');
     }
     const body = buildProblemBody(mapped, req.originalUrl, req.requestId ?? 'unknown');

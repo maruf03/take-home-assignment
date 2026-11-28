@@ -77,6 +77,7 @@ describe('BullExtractionEnqueuer integration', () => {
       expect(after!.data).toMatchObject({
         versionId,
         trigger: 'retry',
+        requestId: 'req-retry',
         correlationId: 'req-retry',
       });
       expect(after!.opts.priority).toBe(1);

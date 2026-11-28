@@ -11,6 +11,7 @@ export const EXTRACTION_QUEUE = 'extraction';
 export interface ExtractionJobData {
   readonly versionId: string;
   readonly trigger?: RunTrigger;
+  readonly requestId?: string | null;
   readonly correlationId?: string | null;
 }
 
@@ -97,7 +98,7 @@ export class ExtractionProcessor extends WorkerHost {
 
     const outcome = await this.pipeline.run(job.data.versionId, {
       trigger: job.data.trigger ?? 'upload',
-      correlationId: job.data.correlationId ?? null,
+      correlationId: job.data.requestId ?? job.data.correlationId ?? null,
     });
 
     switch (outcome.status) {

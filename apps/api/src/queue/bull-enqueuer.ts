@@ -68,7 +68,12 @@ export class BullExtractionEnqueuer implements ExtractionEnqueuer {
     }
     await this.queue.add(
       'extract',
-      { versionId, trigger: options.trigger, correlationId: options.correlationId ?? null },
+      {
+        versionId,
+        trigger: options.trigger,
+        requestId: options.correlationId ?? null,
+        correlationId: options.correlationId ?? null,
+      },
       { jobId: versionId, priority: UPLOAD_PRIORITY },
     );
   }

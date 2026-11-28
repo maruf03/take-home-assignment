@@ -13,6 +13,7 @@ import { HealthController } from './health/health.controller.js';
 import { MetricsController } from './health/metrics.controller.js';
 import { createPinoHttpOptions } from './observability/logger.js';
 import { ApiMetricsService } from './observability/metrics.service.js';
+import { DebugEndpointGuard } from './runs/debug-endpoint.guard.js';
 import { RunsController } from './runs/runs.controller.js';
 import { RunsService } from './runs/runs.service.js';
 import { ApiThrottlerGuard } from './security/throttler.guard.js';
@@ -59,6 +60,7 @@ export class AppModule {
         ValuesService,
         DocumentTypesService,
         RunsService,
+        DebugEndpointGuard,
       ],
     };
   }

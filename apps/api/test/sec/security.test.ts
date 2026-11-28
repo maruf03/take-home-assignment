@@ -67,14 +67,25 @@ describe('[I8] Security controls (sec.*)', () => {
     expect(problemDetailsSchema.parse(await twoRes.json()).code).toBe('VALIDATION_FAILED');
   });
 
-  it('[I8] sec.headers sets nosniff, Helmet CSP, no x-powered-by, and sandbox/attachment/CORP on /file', async () => {
+  it('[I8] sec.headers sets nosniff, strict Helmet CSP (no HTML defaults), X-Frame-Options DENY, /docs CSP, and sandbox/attachment/CORP on /file', async () => {
     const listRes = await fetch(`${h.baseUrl}/documents`);
     expect(listRes.status).toBe(200);
     expect(listRes.headers.get('x-content-type-options')).toBe('nosniff');
     expect(listRes.headers.get('x-powered-by')).toBeNull();
+    expect(listRes.headers.get('x-frame-options')).toBe('DENY');
     const apiCsp = listRes.headers.get('content-security-policy') ?? '';
     expect(apiCsp).toContain("default-src 'none'");
     expect(apiCsp).toContain("frame-ancestors 'none'");
+    expect(apiCsp).not.toContain('script-src');
+    expect(apiCsp).not.toContain('upgrade-insecure-requests');
+
+    // /docs serves Swagger UI HTML with its own CSP (not disabled) and X-Frame-Options DENY
+    const docsRes = await fetch(`${h.baseUrl}/docs/`);
+    expect(docsRes.status).toBe(200);
+    const docsCsp = docsRes.headers.get('content-security-policy') ?? '';
+    expect(docsCsp).toContain("default-src 'self'");
+    expect(docsCsp).toContain("frame-ancestors 'none'");
+    expect(docsRes.headers.get('x-frame-options')).toBe('DENY');
 
     // Upload a doc with traversal + quotes in filename and verify /file headers
     const createRes = await postMultipart(`${h.baseUrl}/documents`, {
@@ -161,11 +172,21 @@ describe('[I8] Security controls (sec.*)', () => {
         headers: { 'x-forwarded-for': '203.0.113.99' },
       });
       expect(eleventh.status).toBe(429);
-      expect(eleventh.headers.get('retry-after')).toBeTruthy();
+      // Must preserve ThrottlerGuard's real window Retry-After (> 5s for a 60s window), not hardcoded '5'
+      const retryAfter = Number(eleventh.headers.get('retry-after'));
+      expect(Number.isFinite(retryAfter)).toBe(true);
+      expect(retryAfter).toBeGreaterThan(5);
       expect(problemDetailsSchema.parse(await eleventh.json()).code).toBe('RATE_LIMITED');
 
+      // Retry/reextract share the upload throttle group and are also throttled once 10/min is spent
+      const retryThrottled = await fetch(
+        `${throttled.baseUrl}/documents/01950000-0000-7000-8000-000000000001/versions/1/retry`,
+        { method: 'POST' },
+      );
+      expect(retryThrottled.status).toBe(429);
+
       const metricsBody = await (await fetch(`${throttled.baseUrl}/metrics`)).text();
-      expect(metricsBody).toMatch(/rate_limited_total\s+[1-9]/);
+      expect(metricsBody).toMatch(/rate_limited_total\s+[2-9]/);
     } finally {
       await throttled.close();
     }
@@ -203,8 +224,14 @@ describe('[I8] Security controls (sec.*)', () => {
         },
         GEMINI_API_KEY: secret,
         ANTHROPIC_API_KEY: 'sk-ant-topsecret',
+        password: 'TOP_LEVEL_PASSWORD',
+        note: 'PRIVATE_REVIEWER_NOTE',
+        originalFilename: 'confidential-salary.pdf',
         prompt: 'SENSITIVE_PROMPT_TEXT',
         parsedText: 'SENSITIVE_PARSED_DOCUMENT_TEXT',
+        err: { config: { GEMINI_API_KEY: 'NESTED_ERR_SECRET_KEY' } },
+        body: { nested: { parsedText: 'DEEP_PARSED_TEXT' } },
+        items: [{ prompt: 'ARRAY_PROMPT_SECRET' }],
       },
       'request handled',
     );
@@ -213,8 +240,14 @@ describe('[I8] Security controls (sec.*)', () => {
     expect(logged).not.toContain(secret);
     expect(logged).not.toContain('sk-ant-topsecret');
     expect(logged).not.toContain('topsecret');
+    expect(logged).not.toContain('TOP_LEVEL_PASSWORD');
+    expect(logged).not.toContain('PRIVATE_REVIEWER_NOTE');
+    expect(logged).not.toContain('confidential-salary.pdf');
     expect(logged).not.toContain('SENSITIVE_PROMPT_TEXT');
     expect(logged).not.toContain('SENSITIVE_PARSED_DOCUMENT_TEXT');
+    expect(logged).not.toContain('NESTED_ERR_SECRET_KEY');
+    expect(logged).not.toContain('DEEP_PARSED_TEXT');
+    expect(logged).not.toContain('ARRAY_PROMPT_SECRET');
   });
 
   it('[I8] sec.injection: off-page $0.00 injection never produces visible evidence and raises SUSPICIOUS_INSTRUCTIONS', async () => {
