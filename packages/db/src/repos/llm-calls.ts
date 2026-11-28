@@ -1,6 +1,6 @@
 import type { Page } from '@app/contracts/page';
 import type { LlmCallKind } from '@app/contracts/status';
-import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { AppTransaction, DbTx } from '../client.js';
 import { documentVersions, llmCalls } from '../schema/documents.js';
 import { fingerprintFilters, isValidPositiveIntKey, keyset, toPage } from './keyset.js';
@@ -209,8 +209,11 @@ export async function listLlmCalls(
     .select()
     .from(llmCalls)
     .where(and(...conditions))
-    .orderBy(asc(llmCalls.seq))
+    .orderBy(ks.isPrev ? desc(llmCalls.seq) : asc(llmCalls.seq))
     .limit(ks.limitPlusOne);
 
-  return toPage(rows, ks.limit, (row) => String(row.seq), fingerprint);
+  return toPage(rows, ks.limit, (row) => String(row.seq), fingerprint, {
+    isPrev: ks.isPrev,
+    hasCursor: ks.hasCursor,
+  });
 }

@@ -45,6 +45,14 @@ jobs:
       - run: pnpm format:check
       - run: pnpm db:check
       - run: pnpm build
+      - run: pnpm --filter @app/web size-limit
+      - name: Check API contract breaking changes (oasdiff)
+        if: github.event_name == 'pull_request'
+        uses: oasdiff/oasdiff-action@533dbf3adf9462a3f4fe58bd61231c977d837342 # v0.2.3
+        with:
+          base: origin/main:docs/reference/openapi.json
+          revision: docs/reference/openapi.json
+          fail-on-diff: true
       - run: pnpm exec turbo run lint typecheck
       - name: Run unit tests (JUnit)
         run: |

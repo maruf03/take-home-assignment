@@ -30,21 +30,22 @@
 - [ ] Insert the key first (`ON CONFLICT DO NOTHING`), keeping lock order. Replays return the stored status plus the current representation. Purge expired keys in the TTL sweep.
 - [ ] Tests: `[I2]` replay, reuse with a different body → 422, concurrent duplicates → one resource, replay after delete → stored 201.
 
-### Task E1c: UI extras (moved from Core)
+### Task E1c: UI extras (moved from Core; partially promoted to Core Task 15)
 - [ ] Original tab rendered with pdf.js (E7, ADR-0012).
-- [ ] Revert undo toast (`decision:'revert'`, `[I11]`, `NOTHING_TO_REVERT`).
-- [ ] Frozen row order with Re-sort, the inline Keep theirs / Apply mine conflict card, keyboard shortcuts with a toggle, and dark mode (axe on both themes).
+- [x] Revert undo toast (`decision:'revert'`, `[I11]`, `NOTHING_TO_REVERT`) — promoted to Core Task 15.
+- [x] Frozen row order with Re-sort and keyboard shortcuts with a toggle — promoted to Core Task 15.
+- [ ] Inline Keep theirs / Apply mine conflict card and dark mode (axe on both themes).
 
-### Task E1d: Bidirectional paging and secondary docs (moved from Core)
-- [ ] Add `prevCursor` and `Link: rel="prev"`, with a model test for next/prev symmetry.
+### Task E1d: Bidirectional paging and secondary docs (moved from Core; paging promoted to Core Task 15)
+- [x] Add `prevCursor` and `Link: rel="prev"`, with a model test for next/prev symmetry — promoted to Core Task 15.
 - [ ] Write the 🧭 docs in `docs/INDEX.md`: explanation (extraction-core, concurrency, security), reference (api, schema, error-codes, configuration), how-to (testing, record-cassettes, update-goldens, add-document-type).
 
 ### Task E2: Supply chain (Trivy, SBOM, Renovate)
 - [ ] Add a Trivy scan to the `images` job that fails on CRITICAL or HIGH findings (unfixed ones ignored), and generate an SPDX SBOM.
 - [ ] Add `renovate.json`, with pdfjs and unpdf updates requiring manual approval.
 
-### Task E3: API contract diff
-- [ ] Commit `docs/reference/openapi.json`, and run oasdiff in `check` so breaking changes need a label.
+### Task E3: API contract diff *(promoted to Core Task 15)*
+- [x] Commit `docs/reference/openapi.json`, and run oasdiff in `check` so breaking changes need a label.
 
 ### Task E4: Hidden-text detection by render mode
 - [ ] Spike first: generate a PDF with crafted render-mode-3 text, then correlate `getOperatorList` `setTextRenderingMode` with `getTextContent` items, handling save/restore and XObjects.
@@ -59,8 +60,8 @@
 ### Task E7: Terraform
 - [ ] Write the `infra/terraform/aws` modules from §10.8, and run `fmt`, `validate` and `tflint` in CI. Never apply them from CI.
 
-### Task E8: Bundle budget
-- [ ] Use `size-limit` to cap the initial JavaScript at 200 KB gzip, or the measured size plus 10%. The pdf.js chunk is excluded because it is lazy-loaded.
+### Task E8: Bundle budget *(promoted to Core Task 15)*
+- [x] Use `size-limit` to cap the initial JavaScript at 200 KB gzip, or the measured size plus 10%. The pdf.js chunk is excluded because it is lazy-loaded.
 
 ### Task E9: e2e coverage
 - [ ] Collect v8 coverage from the e2e containers and merge it. Do this only if earlier tasks are done.

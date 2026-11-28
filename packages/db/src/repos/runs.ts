@@ -399,10 +399,13 @@ export async function listRuns(
     .select()
     .from(extractionRuns)
     .where(and(...conditions))
-    .orderBy(desc(extractionRuns.runNumber))
+    .orderBy(ks.isPrev ? asc(extractionRuns.runNumber) : desc(extractionRuns.runNumber))
     .limit(ks.limitPlusOne);
 
-  return toPage(rows, ks.limit, (row) => String(row.runNumber), fingerprint);
+  return toPage(rows, ks.limit, (row) => String(row.runNumber), fingerprint, {
+    isPrev: ks.isPrev,
+    hasCursor: ks.hasCursor,
+  });
 }
 
 export async function getRunById(

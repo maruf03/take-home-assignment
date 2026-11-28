@@ -34,7 +34,7 @@ export const correctionInputValueSchema = z.union([
 
 export type CorrectionInputValue = z.infer<typeof correctionInputValueSchema>;
 
-// Core supports approve and correct (revert is Extended E1c; spec §15.3).
+// Core supports approve, correct, and revert (undo returns value to pending).
 export const createReviewRequestSchema = z.discriminatedUnion('decision', [
   z
     .object({
@@ -47,6 +47,13 @@ export const createReviewRequestSchema = z.discriminatedUnion('decision', [
     .object({
       decision: z.literal('correct'),
       correctedValue: correctionInputValueSchema,
+      note: reviewNoteInputSchema,
+      expectedCurrentReviewId: expectedCurrentReviewIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.literal('revert'),
       note: reviewNoteInputSchema,
       expectedCurrentReviewId: expectedCurrentReviewIdSchema,
     })

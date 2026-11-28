@@ -327,15 +327,6 @@ describe('API Core Task 9 integration: upload, documents, versions, values, revi
     const currentFromConflict = valueViewDtoSchema.parse(conflictProb.details?.['currentValue']);
     expect(currentFromConflict.review?.id).toBe(correctBody.value.review?.id);
 
-    // Revert is not in Core -> 400 VALIDATION_FAILED
-    const revertRes = await fetch(`${h.baseUrl}/values/${v1Total.id}/review`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ decision: 'revert' }),
-    });
-    expect(revertRes.status).toBe(400);
-    expect(problemDetailsSchema.parse(await revertRes.json()).code).toBe('VALIDATION_FAILED');
-
     // Invalid correction -> 422 INVALID_CORRECTION
     const badCorrRes = await fetch(`${h.baseUrl}/values/${v1Total.id}/review`, {
       method: 'POST',
@@ -752,5 +743,70 @@ describe('API Core Task 9 integration: upload, documents, versions, values, revi
       expect(err.message).not.toContain(longInvalid);
     }
     expect(longCorrProb.detail).not.toContain(longInvalid);
+  });
+
+  it('[I11] api.review.revert-to-pending & api.review.revert-requires-expected: reverts an approved value to pending and rejects reverting pending with 409 NOTHING_TO_REVERT', async () => {
+    const pdf1 = await readFixturePdf('invoice-001.pdf');
+    const uploadRes = await postMultipart(`${h.baseUrl}/documents`, {
+      file: { buffer: pdf1, filename: 'invoice-001.pdf' },
+      fields: { type: 'invoice' },
+    });
+    expect(uploadRes.status).toBe(201);
+    const created = documentDetailDtoSchema.parse(await uploadRes.json());
+    const v1Id = h.enqueuer.calls.at(-1)!.versionId;
+    await extractInvoiceVersion(v1Id, {
+      vendor: 'Meridian Office Supplies',
+      total: '5230.29',
+      parsedText: 'Vendor: Meridian Office Supplies\nTotal: $5230.29\n',
+    });
+
+    const detail = documentDetailDtoSchema.parse(
+      await (await fetch(`${h.baseUrl}/documents/${created.id}`)).json(),
+    );
+    const vendor = detail.values.find((v) => v.fieldKey === 'vendor_name')!;
+
+    const approveRes = await fetch(`${h.baseUrl}/values/${vendor.id}/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'approve', expectedCurrentReviewId: null }),
+    });
+    expect(approveRes.status).toBe(201);
+    const approved = reviewResponseDtoSchema.parse(await approveRes.json());
+    const activeReviewId = approved.value.review!.id;
+    expect(approved.value.reviewState).toBe('approved');
+    expect(approved.progress.pending).toBe(2);
+
+    // Stale expectedCurrentReviewId on revert -> 409 REVIEW_CONFLICT
+    const staleRevertRes = await fetch(`${h.baseUrl}/values/${vendor.id}/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'revert', expectedCurrentReviewId: null }),
+    });
+    expect(staleRevertRes.status).toBe(409);
+    expect(problemDetailsSchema.parse(await staleRevertRes.json()).code).toBe('REVIEW_CONFLICT');
+
+    // Valid revert -> 201, back to pending, pending_count increments
+    const revertRes = await fetch(`${h.baseUrl}/values/${vendor.id}/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'revert', expectedCurrentReviewId: activeReviewId }),
+    });
+    expect(revertRes.status).toBe(201);
+    const reverted = reviewResponseDtoSchema.parse(await revertRes.json());
+    expect(reverted.value.reviewState).toBe('pending');
+    expect(reverted.value.review?.decision).toBe('revert');
+    expect(reverted.progress.pending).toBe(3);
+
+    // Reverting an already-pending value -> 409 NOTHING_TO_REVERT
+    const nothingRes = await fetch(`${h.baseUrl}/values/${vendor.id}/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        decision: 'revert',
+        expectedCurrentReviewId: reverted.value.review!.id,
+      }),
+    });
+    expect(nothingRes.status).toBe(409);
+    expect(problemDetailsSchema.parse(await nothingRes.json()).code).toBe('NOTHING_TO_REVERT');
   });
 });

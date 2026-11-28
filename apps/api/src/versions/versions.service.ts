@@ -157,19 +157,25 @@ export class VersionsService {
         reviewState: query.reviewState,
         attention: query.attention,
       });
-      const afterPosition = query.cursor
-        ? Number(decodeCursor(query.cursor, fingerprint, isValidPositiveIntKey).k)
-        : 0;
+      const decoded = query.cursor
+        ? decodeCursor(query.cursor, fingerprint, isValidPositiveIntKey)
+        : null;
+      const isPrev = decoded?.d === 'prev';
+      const cursorPosition = decoded ? Number(decoded.k) : 0;
       const all = await this.views.valueViews(tx, version, document);
       // Spec §7.2: GET .../versions/:n/values is ordered by position ASC (bounded <= 100).
       const filtered = [...all]
-        .sort((a, b) => a.position - b.position)
+        .sort((a, b) => (isPrev ? b.position - a.position : a.position - b.position))
         .filter((v) => {
           if (query.reviewState !== undefined && v.reviewState !== query.reviewState) return false;
           if (query.attention !== undefined && v.attention !== query.attention) return false;
-          return v.position > afterPosition;
+          if (!decoded) return true;
+          return isPrev ? v.position < cursorPosition : v.position > cursorPosition;
         });
-      return toPage(filtered, query.limit, (v) => String(v.position), fingerprint);
+      return toPage(filtered, query.limit, (v) => String(v.position), fingerprint, {
+        isPrev,
+        hasCursor: decoded !== null,
+      });
     });
   }
 

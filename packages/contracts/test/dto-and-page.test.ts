@@ -11,22 +11,27 @@ const UUID_1 = '01937000-0000-7000-8000-000000000001';
 const UUID_2 = '01937000-0000-7000-8000-000000000002';
 const NOW = '2026-11-27T12:00:00.000Z';
 
-describe('Core forward-only Page and listQuery', () => {
-  it('omits prevCursor in Core PageMeta and rejects unexpected prevCursor keys', () => {
+describe('Bidirectional Page and listQuery', () => {
+  it('supports prevCursor in PageMeta (default null) and rejects invalid cursors', () => {
     const parsed = pageSchema(z.object({ id: z.string() })).parse({
       data: [{ id: UUID_1 }],
       page: { limit: 20, hasMore: true, nextCursor: 'abc' },
     });
-    expect(parsed.page).toEqual({ limit: 20, hasMore: true, nextCursor: 'abc' });
+    expect(parsed.page).toEqual({
+      limit: 20,
+      hasMore: true,
+      nextCursor: 'abc',
+      prevCursor: null,
+    });
 
     expect(
       pageMetaSchema.safeParse({
         limit: 20,
         hasMore: false,
         nextCursor: null,
-        prevCursor: null,
+        prevCursor: 'prev-1',
       }).success,
-    ).toBe(false);
+    ).toBe(true);
 
     expect(
       pageMetaSchema.safeParse({

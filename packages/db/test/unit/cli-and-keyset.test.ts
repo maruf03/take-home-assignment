@@ -7,6 +7,7 @@ import {
   fingerprintFilters,
   isValidPositiveIntKey,
   keyset,
+  toPage,
 } from '../../src/repos/keyset.js';
 import { documents } from '../../src/schema/documents.js';
 
@@ -138,5 +139,24 @@ describe('keyset fingerprint and integer bounds', () => {
     expect(() => keyset({ key: documents.id, limit: 0 })).toThrow(/Limit must be an integer/);
     expect(() => keyset({ key: documents.id, limit: 101 })).toThrow(/Limit must be an integer/);
     expect(() => keyset({ key: documents.id, limit: 1.5 })).toThrow(/Limit must be an integer/);
+  });
+
+  it('[I4] toPage next/prev symmetry returns exact previous slice on backward navigation', () => {
+    const items = ['a', 'b', 'c', 'd', 'e'];
+    const p1 = toPage(items.slice(0, 3), 2, (x) => x, '', { isPrev: false, hasCursor: false });
+    expect(p1.data).toEqual(['a', 'b']);
+    expect(p1.page.prevCursor).toBeNull();
+    expect(p1.page.nextCursor).not.toBeNull();
+
+    const p2 = toPage(items.slice(2, 5), 2, (x) => x, '', { isPrev: false, hasCursor: true });
+    expect(p2.data).toEqual(['c', 'd']);
+    expect(p2.page.prevCursor).not.toBeNull();
+
+    // Going prev from p2 ('c') receives ['b', 'a'] (reversed asc query with limit+1)
+    const back = toPage(['b', 'a'], 2, (x) => x, '', { isPrev: true, hasCursor: true });
+    expect(back.data).toEqual(['a', 'b']);
+    expect(back.page.prevCursor).toBeNull();
+    expect(back.page.hasMore).toBe(true);
+    expect(back.page.nextCursor).not.toBeNull();
   });
 });

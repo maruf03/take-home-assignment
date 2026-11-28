@@ -9,17 +9,24 @@ import { tap } from 'rxjs';
 import type { ReqLike, ResLike } from './http.js';
 
 interface PageLike {
-  readonly page?: { readonly nextCursor?: string | null };
+  readonly page?: {
+    readonly nextCursor?: string | null;
+    readonly prevCursor?: string | null;
+  };
+}
+
+export function buildPageLink(originalUrl: string, cursor: string, rel: 'next' | 'prev'): string {
+  const [path = '', rawQuery = ''] = originalUrl.split('?');
+  const params = new URLSearchParams(rawQuery);
+  params.set('cursor', cursor);
+  return `<${path}?${params.toString()}>; rel="${rel}"`;
 }
 
 export function buildNextLink(originalUrl: string, nextCursor: string): string {
-  const [path = '', rawQuery = ''] = originalUrl.split('?');
-  const params = new URLSearchParams(rawQuery);
-  params.set('cursor', nextCursor);
-  return `<${path}?${params.toString()}>; rel="next"`;
+  return buildPageLink(originalUrl, nextCursor, 'next');
 }
 
-/** Emits `Link: <…>; rel="next"` for forward-only keyset pages (spec §7.2, Core). */
+/** Emits `Link: <…>; rel="next"` / `rel="prev"` for bidirectional keyset pages. */
 @Injectable()
 export class PaginatedInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
@@ -28,9 +35,16 @@ export class PaginatedInterceptor implements NestInterceptor {
     const res = http.getResponse<ResLike>();
     return next.handle().pipe(
       tap((body: unknown) => {
-        const nextCursor = (body as PageLike | null)?.page?.nextCursor;
-        if (typeof nextCursor === 'string' && nextCursor.length > 0) {
-          res.setHeader('Link', buildNextLink(req.originalUrl, nextCursor));
+        const page = (body as PageLike | null)?.page;
+        const links: string[] = [];
+        if (typeof page?.nextCursor === 'string' && page.nextCursor.length > 0) {
+          links.push(buildPageLink(req.originalUrl, page.nextCursor, 'next'));
+        }
+        if (typeof page?.prevCursor === 'string' && page.prevCursor.length > 0) {
+          links.push(buildPageLink(req.originalUrl, page.prevCursor, 'prev'));
+        }
+        if (links.length > 0) {
+          res.setHeader('Link', links.join(', '));
         }
       }),
     );
