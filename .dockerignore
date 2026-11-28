@@ -13,7 +13,11 @@ test-results
 playwright-report
 blob-report
 *.log
+**/*.log
 *.jsonl
+**/*.jsonl
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example

@@ -115,6 +115,8 @@ services:
       args:
         APP: api
     command: ['node', 'node_modules/@app/db/dist/cli/migrate-and-seed.js']
+    pids_limit: 64
+    mem_limit: 512m
     restart: 'no'
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -145,6 +147,7 @@ services:
     restart: unless-stopped
     ports:
       - '127.0.0.1:3000:3000'
+    pids_limit: 128
     mem_limit: 512m
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -244,6 +247,8 @@ services:
     security_opt:
       - no-new-privileges:true
     logging: *default-logging
+    pids_limit: 64
+    mem_limit: 128m
     ports:
       - '127.0.0.1:8080:8080'
     networks:
