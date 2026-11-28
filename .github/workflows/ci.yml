@@ -381,4 +381,4 @@ jobs:
           merge-multiple: true
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm trace:check -- --junit test-results/junit
+      - run: pnpm trace:check --junit test-results/junit
