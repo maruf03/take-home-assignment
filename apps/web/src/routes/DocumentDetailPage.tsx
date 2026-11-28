@@ -1,7 +1,7 @@
-import type { ValueViewDto } from '@app/contracts/dto';
+import type { DocumentDetailDto, ValueViewDto } from '@app/contracts/dto';
 import { getUiCopy } from '@app/contracts/ui-copy';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   useDocumentDetail,
   useVersionDetail,
@@ -12,7 +12,26 @@ import { ValueRow } from '../entities/document/ValueRow.js';
 import { fileDownloadUrl } from '../shared/api/client.js';
 import { DEFAULT_POLL_MS, isStatusInFlight } from '../shared/api/polling.js';
 import { ErrorBoundary } from '../shared/ui/ErrorBoundary.js';
-import { Badge, Banner, ProgressBar, SkeletonRow } from '../shared/ui/Primitives.js';
+import {
+  Badge,
+  Banner,
+  ProgressBar,
+  SkeletonRow,
+  type BadgeTone,
+} from '../shared/ui/Primitives.js';
+
+function statusBadgeFor(status: DocumentDetailDto['status']): { label: string; tone: BadgeTone } {
+  switch (status) {
+    case 'queued':
+      return { label: 'Queued', tone: 'accent' };
+    case 'extracting':
+      return { label: 'Extracting', tone: 'accent' };
+    case 'extracted':
+      return { label: 'Extracted', tone: 'done' };
+    case 'failed':
+      return { label: 'Failed', tone: 'gap' };
+  }
+}
 
 interface ValueGroup {
   readonly id: 'changed' | 'gap' | 'pending' | 'done';
@@ -54,10 +73,34 @@ export interface DocumentDetailPageProps {
 
 export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailPageProps) {
   const params = useParams<{ id: string; n?: string }>();
-  const navigate = useNavigate();
   const documentId = params.id ?? '';
-  const requestedVersion = params.n !== undefined ? Number(params.n) : null;
-  const isHistorical = requestedVersion !== null && Number.isInteger(requestedVersion);
+  return (
+    <DocumentDetailContent
+      key={documentId}
+      documentId={documentId}
+      rawVersion={params.n}
+      pollMs={pollMs}
+    />
+  );
+}
+
+function DocumentDetailContent({
+  documentId,
+  rawVersion,
+  pollMs,
+}: {
+  readonly documentId: string;
+  readonly rawVersion: string | undefined;
+  readonly pollMs: number;
+}) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const invalidVersionParam =
+    rawVersion !== undefined && (!/^\d+$/.test(rawVersion) || Number(rawVersion) < 1);
+  const requestedVersion =
+    rawVersion !== undefined && !invalidVersionParam ? Number(rawVersion) : null;
+  const isHistorical = requestedVersion !== null;
 
   const detailQuery = useDocumentDetail(documentId, pollMs);
   const versionQuery = useVersionDetail(documentId, isHistorical ? requestedVersion : null);
@@ -79,7 +122,8 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
     : (doc?.valuesTextMeta?.textRanges ?? null);
 
   const hasText = isHistorical
-    ? historicalVer !== undefined && historicalVer.status !== 'queued'
+    ? historicalVer !== undefined &&
+      (historicalVer.status === 'extracted' || historicalVer.pageOffsets !== null)
     : doc !== undefined && doc.valuesVersion !== null;
 
   const textQuery = useVersionText(documentId, activeVersionNumber, hasText);
@@ -116,6 +160,22 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
     return orderedValues.find((v) => v.evidence !== null) ?? orderedValues[0] ?? null;
   }, [orderedValues, selectedValueId]);
 
+  if (invalidVersionParam) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <div
+          role="alert"
+          className="rounded border border-red-300 bg-[var(--color-gap-bg)] p-4 text-sm text-[var(--color-gap)]"
+        >
+          Invalid version number &ldquo;{rawVersion}&rdquo;.{' '}
+          <Link to={`/documents/${documentId}`} className="font-medium underline">
+            Go to current version
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (detailQuery.isLoading || (isHistorical && versionQuery.isLoading)) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-6">
@@ -130,6 +190,9 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
     return null;
   }
 
+  const activeStatus = isHistorical && historicalVer ? historicalVer.status : doc.status;
+  const activeStatusBadge = statusBadgeFor(activeStatus);
+
   const newerFailed =
     !isHistorical &&
     doc.currentVersion.status === 'failed' &&
@@ -143,11 +206,25 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
   const activeWarnings = isHistorical
     ? (historicalVer?.warnings ?? [])
     : doc.currentVersion.warnings;
-  const hasSecurityWarning =
-    activeWarnings.includes('SUSPICIOUS_INSTRUCTIONS') ||
-    activeWarnings.includes('HIDDEN_TEXT_PRESENT');
+  const hasSuspicious = activeWarnings.includes('SUSPICIOUS_INSTRUCTIONS');
+  const hasHidden = activeWarnings.includes('HIDDEN_TEXT_PRESENT');
+  const hasSecurityWarning = hasSuspicious || hasHidden;
 
   const progress = isHistorical && historicalVer ? historicalVer.progress : doc.progress;
+
+  const hasActiveVersionInRecent =
+    activeVersionNumber !== null &&
+    doc.recentVersions.some((v) => v.number === activeVersionNumber);
+
+  const showInFlightPanel =
+    (!isHistorical && doc.valuesVersion === null && isStatusInFlight(doc.status)) ||
+    (isHistorical && historicalVer !== undefined && isStatusInFlight(historicalVer.status));
+
+  const showFailedPanel =
+    (!isHistorical && doc.valuesVersion === null && doc.status === 'failed') ||
+    (isHistorical && historicalVer !== undefined && historicalVer.status === 'failed');
+
+  const failedError = isHistorical ? (historicalVer?.error ?? null) : doc.currentVersion.error;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-5">
@@ -166,6 +243,7 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
                 /
               </span>
               <Badge>{doc.typeLabel}</Badge>
+              <Badge tone={activeStatusBadge.tone}>{activeStatusBadge.label}</Badge>
             </div>
             <h1 className="mt-1 truncate text-lg font-semibold text-[var(--color-ink)]">
               {doc.title}
@@ -181,7 +259,10 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
                   value={activeVersionNumber ?? doc.currentVersion.number}
                   onChange={(e) => {
                     const num = Number(e.target.value);
-                    if (num === doc.valuesVersion || num === doc.currentVersion.number) {
+                    const isDefaultRouteVersion =
+                      num === doc.valuesVersion ||
+                      (doc.valuesVersion === null && num === doc.currentVersion.number);
+                    if (isDefaultRouteVersion) {
                       void navigate(`/documents/${doc.id}`);
                     } else {
                       void navigate(`/documents/${doc.id}/versions/${num}`);
@@ -194,6 +275,12 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
                       v{v.number} ({v.status})
                     </option>
                   ))}
+                  {!hasActiveVersionInRecent && activeVersionNumber !== null ? (
+                    <option key={activeVersionNumber} value={activeVersionNumber}>
+                      v{activeVersionNumber}
+                      {historicalVer ? ` (${historicalVer.status})` : ''}
+                    </option>
+                  ) : null}
                 </select>
               </label>
             ) : null}
@@ -265,28 +352,30 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
         ) : hasSecurityWarning ? (
           <Banner tone="attention">
             <span>
-              {activeWarnings.includes('SUSPICIOUS_INSTRUCTIONS')
-                ? 'Document contains suspicious instruction text. Verify every value against the highlighted source lines.'
-                : 'Hidden or off-page text was detected in this PDF and excluded from automatic evidence.'}
+              {hasSuspicious && hasHidden
+                ? 'Document contains suspicious instruction text and hidden/off-page text. Verify every value against the highlighted source lines.'
+                : hasSuspicious
+                  ? 'Document contains suspicious instruction text. Verify every value against the highlighted source lines.'
+                  : 'Hidden or off-page text was detected in this PDF and excluded from automatic evidence.'}
             </span>
           </Banner>
         ) : null}
       </div>
 
       {/* Main content: in-flight stepper, failed panel, or two-pane detail */}
-      {!isHistorical && doc.valuesVersion === null && isStatusInFlight(doc.status) ? (
+      {showInFlightPanel ? (
         <section
           aria-label="Extraction progress"
           className="mt-6 rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-6"
         >
           <h2 className="text-base font-semibold text-[var(--color-ink)]">
-            Extracting fields from v{doc.currentVersion.number}
+            Extracting fields from v{activeVersionNumber ?? doc.currentVersion.number}
           </h2>
           <ol className="mt-3 flex flex-wrap gap-4 text-sm">
             <li className="font-semibold text-[var(--color-accent)]">1. Queued</li>
             <li
               className={
-                doc.status === 'extracting'
+                activeStatus === 'extracting'
                   ? 'font-semibold text-[var(--color-accent)]'
                   : 'text-[var(--color-ink-muted)]'
               }
@@ -296,27 +385,27 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
             <li className="text-[var(--color-ink-muted)]">3. Ready to review</li>
           </ol>
         </section>
-      ) : !isHistorical && doc.valuesVersion === null && doc.status === 'failed' ? (
+      ) : showFailedPanel ? (
         <section
           role="alert"
           className="mt-6 rounded border border-red-300 bg-[var(--color-gap-bg)] p-6 text-[var(--color-gap)]"
         >
           <h2 className="text-base font-semibold">Extraction failed</h2>
           <p className="mt-1 text-sm text-[var(--color-ink)]">
-            {doc.currentVersion.error
-              ? getUiCopy(`versionError.${doc.currentVersion.error.code}`)
+            {failedError
+              ? getUiCopy(`versionError.${failedError.code}`)
               : 'Extraction could not be completed.'}
           </p>
-          {doc.currentVersion.error ? (
+          {failedError ? (
             <p className="mt-2 font-mono text-xs text-[var(--color-ink-muted)]">
-              Code: {doc.currentVersion.error.code}
+              Code: {failedError.code}
             </p>
           ) : null}
         </section>
       ) : (
-        <div className="mt-4 grid grid-cols-1 gap-5 xl:grid-cols-12">
-          {/* Left pane (~55% -> 7/12 cols at >=1280px): Values grouped Changed -> Gaps -> Pending -> Done */}
-          <div className="space-y-4 xl:col-span-7">
+        <div className="mt-4 grid grid-cols-1 gap-5 min-[1200px]:grid-cols-12">
+          {/* Left pane (~55% -> 7/12 cols at >=1200px): Values grouped Changed -> Gaps -> Pending -> Done */}
+          <div className="space-y-4 min-[1200px]:col-span-7">
             {groups.map((group) => {
               const isDone = group.id === 'done';
               const collapsed = isDone && !doneExpanded;
@@ -369,8 +458,12 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
           </div>
 
           {/* Right pane (~45% -> 5/12 cols): Text pane wrapped in its own ErrorBoundary */}
-          <div className="xl:col-span-5">
-            <ErrorBoundary title="Source text pane unavailable">
+          <div className="min-[1200px]:col-span-5">
+            <ErrorBoundary
+              title="Source text pane unavailable"
+              resetKey={`${doc.id}:${activeVersionNumber}`}
+              onReset={() => void textQuery.refetch()}
+            >
               {activeVersionNumber !== null ? (
                 <TextPane
                   documentId={doc.id}
@@ -381,6 +474,7 @@ export function DocumentDetailPage({ pollMs = DEFAULT_POLL_MS }: DocumentDetailP
                   textRanges={textRanges}
                   activeEvidence={selectedValue?.evidence ?? null}
                   activeFieldLabel={selectedValue?.label ?? null}
+                  hash={location.hash}
                 />
               ) : null}
             </ErrorBoundary>

@@ -35,6 +35,7 @@ export function ProgressBar({ progress }: { readonly progress: Progress }) {
   if (total === 0) {
     return (
       <div
+        role="img"
         className="h-2 w-28 overflow-hidden rounded-full bg-[var(--color-surface-subtle)] border border-[var(--color-border)]"
         aria-label="No extracted fields yet"
       />
@@ -103,6 +104,9 @@ export function SkeletonRow() {
   );
 }
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function ModalDialog({
   open,
   title,
@@ -115,6 +119,8 @@ export function ModalDialog({
   readonly children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const titleId = `dialog-title-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
   useEffect(() => {
@@ -124,7 +130,34 @@ export function ModalDialog({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === 'Tab' && panelRef.current) {
+        const focusables = Array.from(
+          panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        );
+        if (focusables.length === 0) {
+          e.preventDefault();
+          panelRef.current.focus();
+          return;
+        }
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        const active = document.activeElement;
+        if (e.shiftKey) {
+          if (
+            active === first ||
+            active === panelRef.current ||
+            !panelRef.current.contains(active)
+          ) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (active === last || !panelRef.current.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -132,7 +165,7 @@ export function ModalDialog({
       window.removeEventListener('keydown', onKeyDown);
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

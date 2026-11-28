@@ -5,6 +5,7 @@ import { ApiError, ContractMismatchError } from '../api/client.js';
 export interface ErrorBoundaryProps {
   readonly children: ReactNode;
   readonly title?: string;
+  readonly resetKey?: string;
   readonly onReset?: () => void;
 }
 
@@ -26,9 +27,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     // Intentionally silent beyond user-facing boundary UI; never log document content.
   }
 
+  override componentDidUpdate(prevProps: ErrorBoundaryProps): void {
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
+      this.props.onReset?.();
+      this.setState({ error: null });
+    }
+  }
+
   private handleReset = (): void => {
-    this.setState({ error: null });
     this.props.onReset?.();
+    this.setState({ error: null });
   };
 
   override render(): ReactNode {

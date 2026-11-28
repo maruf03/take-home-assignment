@@ -82,15 +82,27 @@ export function DocumentsListPage({
               { id: 'all', label: 'All', count: null },
               { id: 'failed', label: 'Failed', count: null },
             ] as const
-          ).map((tab) => {
+          ).map((tab, idx, arr) => {
             const active = view === tab.id;
             return (
               <button
                 key={tab.id}
+                id={`queue-tab-${tab.id}`}
                 type="button"
                 role="tab"
+                tabIndex={active ? 0 : -1}
                 aria-selected={active}
+                aria-controls="queue-tabpanel"
                 onClick={() => setView(tab.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    setView(arr[(idx + 1) % arr.length]!.id);
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    setView(arr[(idx - 1 + arr.length) % arr.length]!.id);
+                  }
+                }}
                 className={`inline-flex min-h-9 items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm font-medium ${
                   active
                     ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
@@ -131,7 +143,12 @@ export function DocumentsListPage({
         </div>
       </div>
 
-      <div className="mt-3 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div
+        id="queue-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`queue-tab-${view}`}
+        className="mt-3 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface)]"
+      >
         {listQuery.isLoading ? (
           <div>
             <SkeletonRow />
@@ -175,6 +192,10 @@ export function DocumentsListPage({
                 doc.valuesVersion !== null &&
                 doc.currentVersion.number > doc.valuesVersion &&
                 isStatusInFlight(doc.currentVersion.status);
+              const newerFailed =
+                doc.valuesVersion !== null &&
+                doc.currentVersion.number > doc.valuesVersion &&
+                doc.currentVersion.status === 'failed';
               return (
                 <li
                   key={doc.id}
@@ -194,6 +215,8 @@ export function DocumentsListPage({
                       </span>
                       {newerExtracting ? (
                         <Badge tone="accent">v{doc.currentVersion.number} extracting</Badge>
+                      ) : newerFailed ? (
+                        <Badge tone="gap">v{doc.currentVersion.number} failed</Badge>
                       ) : null}
                       <span>{formatTimestamp(doc.createdAt)}</span>
                     </div>

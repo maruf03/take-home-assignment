@@ -57,8 +57,25 @@ function parseRetryAfter(res: Response): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? Math.ceil(parsed) : undefined;
 }
 
+function fallbackCodeForStatus(status: number): ProblemCode {
+  switch (status) {
+    case 413:
+      return 'FILE_TOO_LARGE';
+    case 415:
+      return 'UNSUPPORTED_MEDIA_TYPE';
+    case 429:
+      return 'RATE_LIMITED';
+    case 503:
+      return 'DATABASE_UNAVAILABLE';
+    default:
+      return 'INTERNAL';
+  }
+}
+
 async function throwProblemError(res: Response): Promise<never> {
   const retryAfter = parseRetryAfter(res);
+  const fallbackStatus = res.status >= 400 ? res.status : 500;
+  const fallbackCode = fallbackCodeForStatus(res.status);
   let json: unknown;
   try {
     json = await res.json();
@@ -67,8 +84,8 @@ async function throwProblemError(res: Response): Promise<never> {
       {
         type: 'about:blank',
         title: res.statusText || 'Request failed',
-        status: res.status >= 400 ? res.status : 500,
-        code: res.status === 503 ? 'DATABASE_UNAVAILABLE' : 'INTERNAL',
+        status: fallbackStatus,
+        code: fallbackCode,
         detail: res.statusText || 'Request failed',
         requestId: res.headers.get('x-request-id') ?? 'unknown',
       },
@@ -83,8 +100,8 @@ async function throwProblemError(res: Response): Promise<never> {
     {
       type: 'about:blank',
       title: res.statusText || 'Request failed',
-      status: res.status >= 400 ? res.status : 500,
-      code: 'INTERNAL',
+      status: fallbackStatus,
+      code: fallbackCode,
       detail: 'Unexpected error response from server',
       requestId: res.headers.get('x-request-id') ?? 'unknown',
     },
@@ -145,6 +162,13 @@ export const api = {
     });
     if (!res.ok) {
       await throwProblemError(res);
+    }
+    const contentType = res.headers.get('content-type') ?? '';
+    if (!contentType.toLowerCase().startsWith('text/plain')) {
+      throw new ContractMismatchError(
+        path,
+        `Expected text/plain response, got ${contentType || 'missing content-type'}`,
+      );
     }
     return res.text();
   },

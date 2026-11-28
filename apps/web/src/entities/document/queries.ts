@@ -12,7 +12,7 @@ import {
 } from '@app/contracts/dto';
 import { pageSchema, type Page } from '@app/contracts/page';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../shared/api/client.js';
+import { api, ApiError, ContractMismatchError } from '../../shared/api/client.js';
 import {
   DEFAULT_POLL_MS,
   isDocumentInFlight,
@@ -23,11 +23,14 @@ import { queryKeys, type DocumentsListFilters } from '../../shared/api/query-key
 const documentTypesPageSchema = pageSchema(documentTypeDtoSchema);
 const documentsPageSchema = pageSchema(documentSummaryDtoSchema);
 
+const throwOnContractMismatch = (err: Error) => err instanceof ContractMismatchError;
+
 export function useDocumentTypes() {
   return useQuery<Page<DocumentTypeDto>>({
     queryKey: queryKeys.documentTypes(),
     queryFn: ({ signal }) => api.get('/document-types?limit=100', documentTypesPageSchema, signal),
     staleTime: Infinity,
+    throwOnError: throwOnContractMismatch,
   });
 }
 
@@ -36,6 +39,7 @@ export function useDocumentsFacets() {
     queryKey: queryKeys.documents.facets(),
     queryFn: ({ signal }) => api.get('/documents/facets', documentsFacetsDtoSchema, signal),
     staleTime: 10_000,
+    throwOnError: throwOnContractMismatch,
   });
 }
 
@@ -69,6 +73,7 @@ export function useDocumentsList(filters: DocumentsListFilters, pollMs = DEFAULT
     staleTime: 10_000,
     // Spec §14.6: poll page 1 only while something on page 1 is in flight.
     refetchInterval: (query) => (isFirstPageInFlight(query.state.data?.pages) ? pollMs : false),
+    throwOnError: throwOnContractMismatch,
   });
 }
 
@@ -108,6 +113,9 @@ export function useVersionText(documentId: string, versionNumber: number | null,
         signal,
       ),
     staleTime: 60_000,
+    retry: (failureCount, err) =>
+      !(err instanceof ApiError && err.status === 409) && failureCount < 1,
+    throwOnError: throwOnContractMismatch,
   });
 }
 

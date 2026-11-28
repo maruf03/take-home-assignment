@@ -33,4 +33,41 @@ describe('text-segments pure builder', () => {
       'Hidden secret',
     );
   });
+
+  it('preserves overlapping flags (active + lowVisibility, hidden + lowVisibility) and multi-line evidence', () => {
+    const text = 'Line one start\nLine two end\nHidden faint tail';
+    const start = text.indexOf('start');
+    const end = text.indexOf('end') + 3;
+    const hiddenStart = text.indexOf('Hidden faint tail');
+    const faintStart = text.indexOf('faint');
+
+    const lines = buildDocumentLines(text, {
+      activeRange: { start, end },
+      otherOccurrences: [],
+      textRanges: {
+        hidden: [[hiddenStart, hiddenStart + 'Hidden faint tail'.length, 'WHITE_ON_WHITE']],
+        lowVisibility: [
+          [start, end],
+          [faintStart, faintStart + 'faint'.length],
+        ],
+      },
+    });
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]!.segments.find((s) => s.text === 'start')).toMatchObject({
+      active: true,
+      lowVisibility: true,
+    });
+    expect(lines[1]!.segments.find((s) => s.text === 'Line two end')).toMatchObject({
+      active: true,
+      lowVisibility: true,
+    });
+    const hiddenSegs = lines[2]!.segments.filter((s) => s.hiddenReason === 'WHITE_ON_WHITE');
+    expect(hiddenSegs).toHaveLength(3);
+    expect(hiddenSegs[1]).toMatchObject({
+      text: 'faint',
+      hiddenReason: 'WHITE_ON_WHITE',
+      lowVisibility: true,
+    });
+  });
 });

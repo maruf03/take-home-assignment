@@ -1,6 +1,6 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryErrorResetBoundary } from '@tanstack/react-query';
 import { useState } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { UploadDialog } from '../entities/document/UploadDialog.js';
 import { DocumentDetailPage } from '../routes/DocumentDetailPage.js';
 import { DocumentsListPage } from '../routes/DocumentsListPage.js';
@@ -11,24 +11,32 @@ import { AppShell } from './AppShell.js';
 export function AppRoutes({ pollMs = DEFAULT_POLL_MS }: { readonly pollMs?: number }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeResetKey = `${location.pathname}${location.search}`;
 
   return (
     <AppShell onOpenUpload={() => setUploadOpen(true)}>
-      <ErrorBoundary>
-        <Routes>
-          <Route path="/" element={<Navigate to="/documents?view=needs-review" replace />} />
-          <Route
-            path="/documents"
-            element={<DocumentsListPage onOpenUpload={() => setUploadOpen(true)} pollMs={pollMs} />}
-          />
-          <Route path="/documents/:id" element={<DocumentDetailPage pollMs={pollMs} />} />
-          <Route
-            path="/documents/:id/versions/:n"
-            element={<DocumentDetailPage pollMs={pollMs} />}
-          />
-          <Route path="*" element={<Navigate to="/documents?view=needs-review" replace />} />
-        </Routes>
-      </ErrorBoundary>
+      <QueryErrorResetBoundary>
+        {({ reset }) => (
+          <ErrorBoundary onReset={reset} resetKey={routeResetKey}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/documents?view=needs-review" replace />} />
+              <Route
+                path="/documents"
+                element={
+                  <DocumentsListPage onOpenUpload={() => setUploadOpen(true)} pollMs={pollMs} />
+                }
+              />
+              <Route path="/documents/:id" element={<DocumentDetailPage pollMs={pollMs} />} />
+              <Route
+                path="/documents/:id/versions/:n"
+                element={<DocumentDetailPage pollMs={pollMs} />}
+              />
+              <Route path="*" element={<Navigate to="/documents?view=needs-review" replace />} />
+            </Routes>
+          </ErrorBoundary>
+        )}
+      </QueryErrorResetBoundary>
 
       <UploadDialog
         open={uploadOpen}

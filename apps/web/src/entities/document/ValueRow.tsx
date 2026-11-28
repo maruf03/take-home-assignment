@@ -50,14 +50,24 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
       : null;
 
   const gapCopy =
-    value.gap !== null ? formatCopy(`gap.${value.gap.code}`, { type: value.fieldType }) : null;
+    value.gap !== null
+      ? value.gap.code === 'CONFLICTING_EVIDENCE'
+        ? 'Different parts of the document give different values.'
+        : formatCopy(`gap.${value.gap.code}`, { type: value.fieldType })
+      : null;
+
+  const evidenceDescId = value.evidence ? `evidence-desc-${value.id}` : undefined;
 
   return (
     <div
       role="group"
       aria-label={value.label}
       data-value-id={value.id}
-      onClick={() => onSelect(value)}
+      onClick={(e) => {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest('button, a, input, select, textarea')) return;
+        onSelect(value);
+      }}
       className={`cursor-pointer border-b border-[var(--color-border)] px-4 py-3.5 transition-colors ${
         selected
           ? 'bg-blue-50/70 ring-2 ring-inset ring-[var(--color-accent)]'
@@ -67,7 +77,15 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-[var(--color-ink-muted)]">{value.label}</span>
+            <button
+              type="button"
+              aria-pressed={selected}
+              aria-describedby={evidenceDescId}
+              onClick={() => onSelect(value)}
+              className="text-left text-sm font-medium text-[var(--color-ink-muted)] hover:text-[var(--color-accent)]"
+            >
+              {value.label}
+            </button>
             <Badge tone={badge.tone}>{badge.label}</Badge>
           </div>
           <div className="mt-1 flex flex-wrap items-baseline gap-2">
@@ -99,7 +117,10 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
       ) : null}
 
       {value.evidence ? (
-        <div className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2.5 py-1.5">
+        <div
+          id={evidenceDescId}
+          className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2.5 py-1.5"
+        >
           <p className="font-mono text-xs text-[var(--color-ink)]">{value.evidence.quote}</p>
           <p className="mt-0.5 text-xs text-[var(--color-ink-muted)]">
             Line {value.evidence.line}

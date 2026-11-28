@@ -35,6 +35,9 @@ export function UploadDialog({ open, onClose, onUploaded }: UploadDialogProps) {
   const effectiveType = selectedType || types[0]?.key || 'invoice';
 
   const handleClose = () => {
+    setFile(null);
+    setTitle('');
+    setSelectedType('');
     setLocalError(null);
     uploadMutation.reset();
     onClose();

@@ -6,6 +6,7 @@ import { buildDocumentLines, type TextSegment } from '../../shared/lib/text-segm
 const VIRTUALIZE_THRESHOLD = 2000;
 const LINE_HEIGHT_PX = 22;
 const OVERSCAN_LINES = 30;
+const DEFAULT_VIEWPORT_PX = 660;
 
 export interface TextPaneProps {
   readonly documentId: string;
@@ -16,56 +17,76 @@ export interface TextPaneProps {
   readonly textRanges: TextRanges | null;
   readonly activeEvidence: EvidenceDto | null;
   readonly activeFieldLabel: string | null;
+  readonly hash?: string;
 }
 
-function renderSegment(seg: TextSegment, idx: number) {
+function parseHashLine(hash: string | undefined): number | null {
+  if (!hash) return null;
+  const match = /^#L(\d+)$/.exec(hash);
+  if (!match) return null;
+  const num = Number(match[1]);
+  return Number.isInteger(num) && num >= 1 ? num : null;
+}
+
+function renderSegment(seg: TextSegment, idx: number, segments: readonly TextSegment[]) {
+  const classes: string[] = [];
+  const titles: string[] = [];
+
+  if (seg.active) {
+    classes.push('evidence-mark');
+  }
+  if (seg.hiddenReason !== null) {
+    classes.push('text-hidden-pdf');
+    titles.push(`Hidden in PDF (${seg.hiddenReason})`);
+  }
+  if (seg.otherOccurrence) {
+    classes.push('evidence-other-occurrence');
+    titles.push('Other matching occurrence');
+  }
+  if (seg.lowVisibility) {
+    classes.push('text-low-visibility');
+    titles.push('Low-visibility text in PDF');
+  }
+
+  const nextSeg = segments[idx + 1];
+  const isEndOfHiddenRun = seg.hiddenReason !== null && nextSeg?.hiddenReason !== seg.hiddenReason;
+
+  const hiddenBadge = isEndOfHiddenRun ? (
+    <>
+      {' '}
+      <span className="ml-1 inline-block rounded bg-gray-200 px-1 text-[10px] font-sans font-medium text-gray-700">
+        hidden in PDF
+      </span>
+    </>
+  ) : null;
+
+  const title = titles.length > 0 ? titles.join(' · ') : undefined;
+  const className = classes.length > 0 ? classes.join(' ') : undefined;
+
   if (seg.active) {
     return (
-      <mark key={idx} data-testid="active-evidence-mark" className="evidence-mark">
+      <mark key={idx} data-testid="active-evidence-mark" className={className} title={title}>
         {seg.text}
+        {hiddenBadge}
       </mark>
     );
   }
-  if (seg.hiddenReason !== null) {
-    return (
-      <span
-        key={idx}
-        data-testid="hidden-text-span"
-        className="text-hidden-pdf"
-        title={`Hidden in PDF (${seg.hiddenReason})`}
-      >
-        {seg.text}{' '}
-        <span className="ml-1 inline-block rounded bg-gray-200 px-1 text-[10px] font-sans font-medium text-gray-700">
-          hidden in PDF
-        </span>
-      </span>
-    );
-  }
-  if (seg.otherOccurrence) {
-    return (
-      <span
-        key={idx}
-        data-testid="other-occurrence-span"
-        className="evidence-other-occurrence"
-        title="Other matching occurrence"
-      >
-        {seg.text}
-      </span>
-    );
-  }
-  if (seg.lowVisibility) {
-    return (
-      <span
-        key={idx}
-        data-testid="low-visibility-span"
-        className="text-low-visibility"
-        title="Low-visibility text in PDF"
-      >
-        {seg.text}
-      </span>
-    );
-  }
-  return <span key={idx}>{seg.text}</span>;
+
+  const testId =
+    seg.hiddenReason !== null
+      ? 'hidden-text-span'
+      : seg.otherOccurrence
+        ? 'other-occurrence-span'
+        : seg.lowVisibility
+          ? 'low-visibility-span'
+          : undefined;
+
+  return (
+    <span key={idx} data-testid={testId} className={className} title={title}>
+      {seg.text}
+      {hiddenBadge}
+    </span>
+  );
 }
 
 /**
@@ -85,9 +106,21 @@ export function TextPane({
   textRanges,
   activeEvidence,
   activeFieldLabel,
+  hash,
 }: TextPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(DEFAULT_VIEWPORT_PX);
+  const lastScrolledKeyRef = useRef<string | null>(null);
+
+  // Reset scroll state when switching document or version.
+  useEffect(() => {
+    setScrollTop(0);
+    lastScrolledKeyRef.current = null;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [documentId, versionNumber]);
 
   const lines = useMemo(() => {
     if (text === null) return [];
@@ -100,29 +133,61 @@ export function TextPane({
 
   const isVirtualized = lines.length > VIRTUALIZE_THRESHOLD;
 
-  useEffect(() => {
-    if (!activeEvidence || !scrollRef.current) return;
-    const target = scrollRef.current.querySelector<HTMLElement>(`#L${activeEvidence.line}`);
-    if (target && typeof target.scrollIntoView === 'function') {
-      target.scrollIntoView({ block: 'center' });
-    } else if (isVirtualized) {
-      scrollRef.current.scrollTop = Math.max(0, (activeEvidence.line - 5) * LINE_HEIGHT_PX);
-    }
-  }, [activeEvidence, isVirtualized]);
-
   const visibleSlice = useMemo(() => {
     if (!isVirtualized) {
       return { startIdx: 0, endIdx: lines.length, topPad: 0, bottomPad: 0 };
     }
+    const visibleLines = Math.max(
+      60,
+      Math.ceil(viewportHeight / LINE_HEIGHT_PX) + OVERSCAN_LINES * 2,
+    );
     const startIdx = Math.max(0, Math.floor(scrollTop / LINE_HEIGHT_PX) - OVERSCAN_LINES);
-    const endIdx = Math.min(lines.length, startIdx + 120);
+    const endIdx = Math.min(lines.length, startIdx + visibleLines);
     return {
       startIdx,
       endIdx,
       topPad: startIdx * LINE_HEIGHT_PX,
       bottomPad: Math.max(0, (lines.length - endIdx) * LINE_HEIGHT_PX),
     };
-  }, [isVirtualized, lines.length, scrollTop]);
+  }, [isVirtualized, lines.length, scrollTop, viewportHeight]);
+
+  const hashLine = parseHashLine(hash);
+  const targetLine = hashLine ?? activeEvidence?.line ?? null;
+  const scrollKey =
+    targetLine !== null
+      ? `${documentId}:${versionNumber}:${hashLine !== null ? `hash:${hashLine}` : `ev:${activeEvidence?.start ?? 0}:${targetLine}`}`
+      : null;
+
+  useEffect(() => {
+    if (
+      targetLine === null ||
+      scrollKey === null ||
+      lines.length === 0 ||
+      !scrollRef.current ||
+      lastScrolledKeyRef.current === scrollKey
+    ) {
+      return;
+    }
+    const clampedLine = Math.min(Math.max(1, targetLine), lines.length);
+    const target = scrollRef.current.querySelector<HTMLElement>(`#L${clampedLine}`);
+    if (target) {
+      if (typeof target.scrollIntoView === 'function') {
+        target.scrollIntoView({ block: 'center' });
+      }
+      lastScrolledKeyRef.current = scrollKey;
+    } else if (isVirtualized) {
+      const nextScrollTop = Math.max(0, (clampedLine - 10) * LINE_HEIGHT_PX);
+      scrollRef.current.scrollTop = nextScrollTop;
+      setScrollTop(nextScrollTop);
+    }
+  }, [
+    targetLine,
+    scrollKey,
+    lines.length,
+    isVirtualized,
+    visibleSlice.startIdx,
+    visibleSlice.endIdx,
+  ]);
 
   const pdfHref = fileDownloadUrl(documentId, versionNumber);
 
@@ -151,7 +216,16 @@ export function TextPane({
 
       <div
         ref={scrollRef}
-        onScroll={isVirtualized ? (e) => setScrollTop(e.currentTarget.scrollTop) : undefined}
+        onScroll={
+          isVirtualized
+            ? (e) => {
+                setScrollTop(e.currentTarget.scrollTop);
+                if (e.currentTarget.clientHeight > 0) {
+                  setViewportHeight(e.currentTarget.clientHeight);
+                }
+              }
+            : undefined
+        }
         className="max-h-[75vh] flex-1 overflow-auto p-2 font-mono text-xs leading-[22px]"
       >
         {loading ? (
@@ -187,7 +261,7 @@ export function TextPane({
                   L{line.lineNumber}
                 </a>
                 <span className="min-w-0 flex-1">
-                  {line.segments.map((seg, idx) => renderSegment(seg, idx))}
+                  {line.segments.map((seg, idx) => renderSegment(seg, idx, line.segments))}
                 </span>
               </div>
             ))}

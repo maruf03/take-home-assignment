@@ -16,16 +16,19 @@ WORKDIR /repo
 COPY --from=pruner /repo/out/json/ .
 COPY --from=pruner /repo/out/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY --from=pruner /repo/out/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=pruner /repo/.npmrc ./.npmrc
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 COPY --from=pruner /repo/out/full/ .
+COPY --from=pruner /repo/packages/config ./packages/config
 COPY tsconfig.base.json ./tsconfig.base.json
 ARG VITE_API_BASE=/api
 ENV VITE_API_BASE=$VITE_API_BASE
-RUN pnpm --filter @app/web... build
+RUN pnpm exec turbo run build --filter=@app/web...
+RUN cp -r apps/web/dist apps/web/dist-public && find apps/web/dist-public -name '*.map' -delete
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0 AS runtime
 COPY infra/nginx/nginx.conf /etc/nginx/nginx.conf
-COPY --from=builder /repo/apps/web/dist /usr/share/nginx/html
+COPY --from=builder /repo/apps/web/dist-public /usr/share/nginx/html
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]
