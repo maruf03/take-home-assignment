@@ -28,6 +28,7 @@ import { ErrorBoundary } from '../shared/ui/ErrorBoundary.js';
 import {
   Badge,
   Banner,
+  ModalDialog,
   ProgressBar,
   SkeletonRow,
   type BadgeTone,
@@ -52,9 +53,17 @@ interface ValueGroup {
   readonly items: readonly ValueViewDto[];
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return target.isContentEditable || target.closest('[contenteditable="true"]') !== null;
+}
+
 function groupValues(
   values: readonly ValueViewDto[],
   previousVersion: number | null,
+  frozenBuckets: Readonly<Record<string, ValueGroup['id']>> | null = null,
 ): ValueGroup[] {
   const byBucket: Record<ValueGroup['id'], ValueViewDto[]> = {
     changed: [],
@@ -63,7 +72,8 @@ function groupValues(
     done: [],
   };
   for (const v of values) {
-    byBucket[v.attention].push(v);
+    const bucket = frozenBuckets?.[v.id] ?? v.attention;
+    byBucket[bucket].push(v);
   }
   for (const key of Object.keys(byBucket) as Array<ValueGroup['id']>) {
     byBucket[key].sort((a, b) => a.position - b.position);
@@ -157,11 +167,64 @@ function DocumentDetailContent({
     return withPrev?.previous?.versionNumber ?? null;
   }, [values]);
 
-  const groups = useMemo(() => groupValues(values, prevVersionNumber), [values, prevVersionNumber]);
+  const [freezeOrderEnabled, setFreezeOrderEnabled] = useState(false);
+  const [frozenOrder, setFrozenOrder] = useState<{
+    version: number | null;
+    buckets: Record<string, ValueGroup['id']>;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!freezeOrderEnabled) {
+      if (frozenOrder !== null) setFrozenOrder(null);
+      return;
+    }
+    if (values.length === 0) return;
+    if (frozenOrder && frozenOrder.version === activeVersionNumber) {
+      const missing = values.some((v) => !(v.id in frozenOrder.buckets));
+      if (!missing) return;
+    }
+    const nextBuckets: Record<string, ValueGroup['id']> = {};
+    for (const v of values) {
+      nextBuckets[v.id] = v.attention;
+    }
+    setFrozenOrder({ version: activeVersionNumber, buckets: nextBuckets });
+  }, [freezeOrderEnabled, values, activeVersionNumber, frozenOrder]);
+
+  const activeFrozenBuckets =
+    freezeOrderEnabled && frozenOrder && frozenOrder.version === activeVersionNumber
+      ? frozenOrder.buckets
+      : null;
+
+  const hasPendingReorder = useMemo(() => {
+    if (!activeFrozenBuckets) return false;
+    return values.some((v) => activeFrozenBuckets[v.id] !== v.attention);
+  }, [values, activeFrozenBuckets]);
+
+  const handleResort = () => {
+    const nextBuckets: Record<string, ValueGroup['id']> = {};
+    for (const v of values) {
+      nextBuckets[v.id] = v.attention;
+    }
+    setFrozenOrder({ version: activeVersionNumber, buckets: nextBuckets });
+  };
+
+  const groups = useMemo(
+    () => groupValues(values, prevVersionNumber, activeFrozenBuckets),
+    [values, prevVersionNumber, activeFrozenBuckets],
+  );
 
   const [selectedValueId, setSelectedValueId] = useState<string | null>(null);
   const [doneExpanded, setDoneExpanded] = useState(false);
   const [uploadVersionOpen, setUploadVersionOpen] = useState(false);
+  const [shortcutsEnabled, setShortcutsEnabled] = useState(true);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [undoToast, setUndoToast] = useState<{
+    valueId: string;
+    fieldKey: string;
+    label: string;
+    actionLabel: string;
+    reviewId: string;
+  } | null>(null);
   const [editingFieldKey, setEditingFieldKey] = useState<string | null>(null);
   const [draftsByField, setDraftsByField] = useState<Record<string, CorrectionDraft>>({});
   const [conflictsByValueId, setConflictsByValueId] = useState<Record<string, ValueViewDto | null>>(
@@ -258,8 +321,17 @@ function DocumentDetailContent({
         },
       },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
           setLiveNotice(`Approved ${val.label}`);
+          if (!res.noop && res.value.review) {
+            setUndoToast({
+              valueId: val.id,
+              fieldKey: val.fieldKey,
+              label: val.label,
+              actionLabel: 'Approved',
+              reviewId: res.value.review.id,
+            });
+          }
           focusNextPendingAfter();
         },
         onError: (err) => {
@@ -297,6 +369,145 @@ function DocumentDetailContent({
       return next;
     });
   };
+
+  const handleRevert = (valueId: string, fieldKey: string, label: string, reviewId: string) => {
+    setUndoToast(null);
+    reviewMutation.mutate(
+      {
+        valueId,
+        fieldKey,
+        body: {
+          decision: 'revert',
+          expectedCurrentReviewId: reviewId,
+        },
+      },
+      {
+        onSuccess: () => {
+          setLiveNotice(`Reverted ${label} to pending`);
+        },
+        onError: (err) => {
+          if (
+            err instanceof ApiError &&
+            err.status === 409 &&
+            (err.code === 'REVIEW_CONFLICT' || err.code === 'VERSION_NOT_REVIEWABLE')
+          ) {
+            return;
+          }
+          setRowErrorByValueId((prev) => ({ ...prev, [valueId]: err }));
+        },
+      },
+    );
+  };
+
+  useEffect(() => {
+    if (!undoToast) return;
+    const timer = setTimeout(() => setUndoToast(null), 8000);
+    return () => clearTimeout(timer);
+  }, [undoToast]);
+
+  const navigableValues = useMemo(
+    () => groups.filter((g) => g.id !== 'done' || doneExpanded).flatMap((g) => g.items),
+    [groups, doneExpanded],
+  );
+
+  useEffect(() => {
+    if (!shortcutsEnabled || isHistorical) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isEditableTarget(event.target)) return;
+      if (shortcutsHelpOpen || uploadVersionOpen) return;
+
+      if (event.key === '?') {
+        event.preventDefault();
+        setShortcutsHelpOpen(true);
+        return;
+      }
+      if (event.key === 'u' && undoToast) {
+        event.preventDefault();
+        handleRevert(undoToast.valueId, undoToast.fieldKey, undoToast.label, undoToast.reviewId);
+        return;
+      }
+      if (event.key === 'v') {
+        event.preventDefault();
+        setDoneExpanded((prev) => !prev);
+        return;
+      }
+      if (navigableValues.length === 0) return;
+
+      const currentIdx = selectedValue
+        ? navigableValues.findIndex((v) => v.id === selectedValue.id)
+        : -1;
+
+      if (event.key === 'j' || event.key === 'k') {
+        event.preventDefault();
+        const delta = event.key === 'j' ? 1 : -1;
+        const nextIdx =
+          currentIdx === -1
+            ? 0
+            : (currentIdx + delta + navigableValues.length) % navigableValues.length;
+        const target = navigableValues[nextIdx];
+        if (target) {
+          setSelectedValueId(target.id);
+          document
+            .querySelector<HTMLElement>(`[data-value-id="${target.id}"]`)
+            ?.scrollIntoView({ block: 'nearest' });
+        }
+        return;
+      }
+
+      if (event.key === 'n') {
+        event.preventDefault();
+        const nonEmpty = groups.filter((g) => g.items.length > 0);
+        if (nonEmpty.length === 0) return;
+        const currentGroupIdx = selectedValue
+          ? nonEmpty.findIndex((g) => g.items.some((v) => v.id === selectedValue.id))
+          : -1;
+        const nextGroup = nonEmpty[(currentGroupIdx + 1) % nonEmpty.length];
+        if (nextGroup) {
+          if (nextGroup.id === 'done') setDoneExpanded(true);
+          const first = nextGroup.items[0];
+          if (first) setSelectedValueId(first.id);
+          document.getElementById(`group-${nextGroup.id}`)?.scrollIntoView({ block: 'nearest' });
+        }
+        return;
+      }
+
+      if (!selectedValue) return;
+      const canAct =
+        selectedValue.reviewable && !reviewMutation.pendingValueIds.has(selectedValue.id);
+      if (
+        event.key === 'a' &&
+        canAct &&
+        selectedValue.kind !== 'gap' &&
+        selectedValue.reviewState !== 'approved'
+      ) {
+        event.preventDefault();
+        handleApprove(selectedValue);
+      } else if (
+        event.key === 'g' &&
+        canAct &&
+        selectedValue.kind === 'gap' &&
+        selectedValue.reviewState === 'pending'
+      ) {
+        event.preventDefault();
+        handleApprove(selectedValue);
+      } else if (event.key === 'c' && canAct) {
+        event.preventDefault();
+        handleStartEdit(selectedValue);
+      } else if (event.key === 'e' && selectedValue.evidence) {
+        event.preventDefault();
+        document
+          .querySelector<HTMLElement>(
+            '[data-testid="active-evidence-mark"], [aria-label="Document source text"]',
+          )
+          ?.scrollIntoView({
+            block: 'center',
+          });
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   if (invalidVersionParam) {
     return (
@@ -457,12 +668,53 @@ function DocumentDetailContent({
                 Download PDF
               </a>
             ) : null}
+
+            <button
+              type="button"
+              onClick={() => {
+                setFreezeOrderEnabled((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    const nextBuckets: Record<string, ValueGroup['id']> = {};
+                    for (const v of values) {
+                      nextBuckets[v.id] = v.attention;
+                    }
+                    setFrozenOrder({ version: activeVersionNumber, buckets: nextBuckets });
+                  } else {
+                    setFrozenOrder(null);
+                  }
+                  return next;
+                });
+              }}
+              aria-pressed={freezeOrderEnabled}
+              className="inline-flex min-h-8 items-center rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-subtle)]"
+            >
+              Freeze order: {freezeOrderEnabled ? 'On' : 'Off'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShortcutsEnabled((prev) => !prev)}
+              aria-pressed={shortcutsEnabled}
+              className="inline-flex min-h-8 items-center rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-subtle)]"
+            >
+              Shortcuts: {shortcutsEnabled ? 'On' : 'Off'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShortcutsHelpOpen((prev) => !prev)}
+              aria-label="Keyboard shortcuts help"
+              className="inline-flex min-h-8 items-center rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-subtle)]"
+            >
+              ?
+            </button>
           </div>
         </div>
 
         {/* Count jump chips */}
         {values.length > 0 ? (
-          <nav aria-label="Value groups" className="mt-2.5 flex flex-wrap gap-2">
+          <nav aria-label="Value groups" className="mt-2.5 flex flex-wrap items-center gap-2">
             {groups.map((g) => (
               <a
                 key={g.id}
@@ -473,6 +725,15 @@ function DocumentDetailContent({
                 <span className="font-semibold">{g.items.length}</span>
               </a>
             ))}
+            {hasPendingReorder ? (
+              <button
+                type="button"
+                onClick={handleResort}
+                className="inline-flex min-h-7 items-center rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-subtle)]"
+              >
+                Re-sort
+              </button>
+            ) : null}
           </nav>
         ) : null}
       </header>
@@ -735,7 +996,7 @@ function DocumentDetailContent({
                                       return next;
                                     });
                                     try {
-                                      await reviewMutation.mutateAsync({
+                                      const res = await reviewMutation.mutateAsync({
                                         valueId: item.id,
                                         fieldKey: item.fieldKey,
                                         optimisticCorrectedValue: canonicalValue,
@@ -748,6 +1009,15 @@ function DocumentDetailContent({
                                       });
                                       handleCancelEdit(item.fieldKey);
                                       setLiveNotice(`Corrected ${item.label}`);
+                                      if (!res.noop && res.value.review) {
+                                        setUndoToast({
+                                          valueId: item.id,
+                                          fieldKey: item.fieldKey,
+                                          label: item.label,
+                                          actionLabel: 'Corrected',
+                                          reviewId: res.value.review.id,
+                                        });
+                                      }
                                       focusNextPendingAfter();
                                     } catch (err) {
                                       if (
@@ -817,6 +1087,64 @@ function DocumentDetailContent({
           );
         }}
       />
+
+      {undoToast ? (
+        <div
+          role="status"
+          className="fixed right-4 bottom-4 z-40 flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm shadow-lg"
+        >
+          <span>
+            {undoToast.actionLabel} {undoToast.label}
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              handleRevert(
+                undoToast.valueId,
+                undoToast.fieldKey,
+                undoToast.label,
+                undoToast.reviewId,
+              )
+            }
+            className="rounded border border-[var(--color-accent)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-subtle)]"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss undo notice"
+            onClick={() => setUndoToast(null)}
+            className="text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      <ModalDialog
+        open={shortcutsHelpOpen}
+        title="Keyboard shortcuts"
+        onClose={() => setShortcutsHelpOpen(false)}
+      >
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+          <dt className="font-mono font-semibold">j / k</dt>
+          <dd>Move to next / previous row</dd>
+          <dt className="font-mono font-semibold">a / g</dt>
+          <dd>Approve value / confirm gap not present</dd>
+          <dt className="font-mono font-semibold">c</dt>
+          <dd>Open inline correction editor</dd>
+          <dt className="font-mono font-semibold">u</dt>
+          <dd>Undo last review while toast is visible</dd>
+          <dt className="font-mono font-semibold">n</dt>
+          <dd>Jump to next group</dd>
+          <dt className="font-mono font-semibold">v</dt>
+          <dd>Toggle Done group</dd>
+          <dt className="font-mono font-semibold">e</dt>
+          <dd>Scroll to evidence in source text</dd>
+          <dt className="font-mono font-semibold">?</dt>
+          <dd>Open this help dialog</dd>
+        </dl>
+      </ModalDialog>
     </div>
   );
 }

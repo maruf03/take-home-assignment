@@ -31,13 +31,15 @@ export class ValuesController {
 
   @Post(':id/review')
   @ThrottleGroup('review')
-  @ApiOperation({ summary: 'Approve or correct an extracted value on the reviewable version' })
+  @ApiOperation({
+    summary: 'Approve, correct, or revert an extracted value on the reviewable version',
+  })
   @ApiBody({
     schema: {
       type: 'object',
       required: ['decision'],
       properties: {
-        decision: { type: 'string', enum: ['approve', 'correct'] },
+        decision: { type: 'string', enum: ['approve', 'correct', 'revert'] },
         correctedValue: {},
         note: { type: 'string', maxLength: 1000 },
         expectedCurrentReviewId: { type: 'string', format: 'uuid', nullable: true },

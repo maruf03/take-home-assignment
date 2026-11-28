@@ -96,7 +96,9 @@ describe('[I4] Forward pagination model and cursor validation', () => {
           m.cursor = page.page.nextCursor;
         } else {
           expect(page.page.nextCursor).toBeNull();
-          expect(link).toBeNull();
+          if (link !== null) {
+            expect(link).not.toContain('rel="next"');
+          }
           m.done = true;
           // Every document that existed before traversal started MUST have appeared exactly once.
           for (const id of m.baselineIds) {
@@ -107,6 +109,32 @@ describe('[I4] Forward pagination model and cursor validation', () => {
 
       toString(): string {
         return 'NextPage';
+      }
+    }
+
+    class PrevPageCmd implements fc.AsyncCommand<Model, Real> {
+      check(m: Model): boolean {
+        return m.cursor !== null;
+      }
+
+      async run(m: Model): Promise<void> {
+        const res = await fetch(
+          `${h.baseUrl}/documents?type=invoice&limit=${m.limit}&cursor=${encodeURIComponent(m.cursor!)}`,
+        );
+        expect(res.status).toBe(200);
+        const page = pageSchema(documentSummaryDtoSchema).parse(await res.json());
+        if (page.page.prevCursor) {
+          const backRes = await fetch(
+            `${h.baseUrl}/documents?type=invoice&limit=${m.limit}&cursor=${encodeURIComponent(page.page.prevCursor)}`,
+          );
+          expect(backRes.status).toBe(200);
+          const backPage = pageSchema(documentSummaryDtoSchema).parse(await backRes.json());
+          expect(backPage.data.map((d) => d.id)).not.toEqual([]);
+        }
+      }
+
+      toString(): string {
+        return 'PrevPage';
       }
     }
 
@@ -129,9 +157,16 @@ describe('[I4] Forward pagination model and cursor validation', () => {
     await fc.assert(
       fc.asyncProperty(
         fc.integer({ min: 1, max: 3 }),
-        fc.commands([fc.constant(new NextPageCmd()), fc.constant(new InsertDocCmd())], {
-          maxCommands: 12,
-        }),
+        fc.commands(
+          [
+            fc.constant(new NextPageCmd()),
+            fc.constant(new PrevPageCmd()),
+            fc.constant(new InsertDocCmd()),
+          ],
+          {
+            maxCommands: 12,
+          },
+        ),
         async (limit, cmds) => {
           await h.resetAndSeed();
           const baselineIds = new Set<string>();
@@ -330,5 +365,19 @@ describe('[I4] Forward pagination model and cursor validation', () => {
     expect(gapOnlyRes.status).toBe(200);
     const gapOnly = pageSchema(valueViewDtoSchema).parse(await gapOnlyRes.json());
     expect(gapOnly.data.map((v) => v.fieldKey)).toEqual(['due_date']);
+
+    // [I4] Bidirectional prevCursor + Link: rel="prev" symmetry on /documents/:id/versions/1/values
+    expect(vPage1.page.prevCursor).toBeNull();
+    expect(vPage2.page.prevCursor).not.toBeNull();
+    expect(vPage2Res.headers.get('link')).toContain('rel="prev"');
+    const backRes = await fetch(
+      `${h.baseUrl}/documents/${document.id}/versions/1/values?limit=2&cursor=${encodeURIComponent(vPage2.page.prevCursor!)}`,
+    );
+    expect(backRes.status).toBe(200);
+    const backPage = pageSchema(valueViewDtoSchema).parse(await backRes.json());
+    expect(backPage.data.map((v) => v.id)).toEqual(vPage1.data.map((v) => v.id));
+    expect(backPage.page.prevCursor).toBeNull();
+    expect(backPage.page.hasMore).toBe(true);
+    expect(backRes.headers.get('link')).toContain('rel="next"');
   });
 });

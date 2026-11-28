@@ -22,15 +22,15 @@ passing test, except IDs marked **Extended**, which gate only once their Extende
 | I1 | Fencing | `db.heartbeat-0-rows-aborts`, `worker.fenced-write-after-lease-loss`, `conc.delete-revokes-fence` *(Extended E1a)* | int, conc |
 | I2 | Idempotency-Key **(Extended E1b)** | `api.idem.replay`, `api.idem.reused-422`, `conc.idem.concurrent-dup`, `api.idem.replay-after-delete` | int, conc |
 | I3 | No double billing | `worker.crash-after-llm-reuses-call`, `worker.manual-retry-fresh`, `worker.call-cap-6` | int |
-| I4 | Pagination has no duplicates or skips (forward in Core; prev symmetry Extended E1d) | `pagination.model` (fc.commands), `pagination.cursor-mismatch`, `pagination.explain-uses-index` | int |
+| I4 | Pagination has no duplicates or skips (forward + `prevCursor` / `rel="prev"` symmetry) | `pagination.model` (fc.commands), `pagination.cursor-mismatch`, `pagination.explain-uses-index`, `toPage` symmetry unit | int, unit |
 | I5 | Soft delete never leaks **(Extended E1a)** | `api.leak.route-table` | int |
 | I6 | A′ edge cases | core table: weak line, PARSER_CHANGED, POSSIBLE_AMENDMENT, EVIDENCE_CHANGED, conflicting lines, hidden baseline, gap→gap, chains, carried correction, revert baseline | unit |
 | I7 | Templates | `seed.template-hash-idempotent`, `seed.edited-template-v2-pin` | int |
 | I8 | Security controls | `sec.*` (upload, headers, filename, no stack, throttle, injection, key isolation, dev-default denylist, cassette provider refused outside test) | sec |
 | I9 | Parser hardening | `pdf.crafted.*`, `pdf.child-killed-worker-survives` | pdf |
 | I10 | DB privileges | `db.grants.snapshot`, `db.grants.app-cannot-update-reviews`, `db.grants.app-cannot-delete-documents` | int |
-| I11 | Undo/revert **(Extended E1c)** | `api.review.revert-to-pending`, `api.review.revert-requires-expected`, `core.carryover.revert-baseline-not-carried`, `conc.pending_count-revert` | int, unit, conc |
-| I12 | UI 5-second rule and a11y | `web` + `e2e`: Needs review count above the fold, Changed group first; axe zero serious on every state (light theme (dark: *Extended E1c*)); shortcuts inert inside inputs *(Extended E1c)* | web, e2e |
+| I11 | Undo/revert | `api.review.revert-to-pending`, `api.review.revert-requires-expected`, `core.carryover.revert-baseline-not-carried`, web Undo toast | int, unit, web |
+| I12 | UI 5-second rule and a11y | `web` + `e2e`: Needs review count above the fold, Changed group first; axe zero serious on every state (light theme (dark: *Extended E1c*)); shortcuts inert inside inputs | web, e2e |
 
 `scripts/trace-check.ts` runs as a **final fan-in CI job** (`needs: [check, integration, compose-smoke, e2e]`). It downloads every job's JUnit artifact, then diffs the test names against this table. A missing or failing ID
 fails CI, and **matrix tests can never be quarantined**.

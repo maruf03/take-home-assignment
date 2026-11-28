@@ -196,10 +196,13 @@ export async function listAliveDocuments(
     .select()
     .from(documents)
     .where(and(...conditions))
-    .orderBy(desc(documents.id))
+    .orderBy(ks.isPrev ? asc(documents.id) : desc(documents.id))
     .limit(ks.limitPlusOne);
 
-  return toPage(rows, ks.limit, (row) => row.id, fingerprint);
+  return toPage(rows, ks.limit, (row) => row.id, fingerprint, {
+    isPrev: ks.isPrev,
+    hasCursor: ks.hasCursor,
+  });
 }
 
 /**
@@ -259,10 +262,13 @@ export async function listDocumentTypesWithTemplates(
     .select()
     .from(documentTypes)
     .where(whereExpr)
-    .orderBy(asc(documentTypes.key))
+    .orderBy(ks.isPrev ? desc(documentTypes.key) : asc(documentTypes.key))
     .limit(ks.limitPlusOne);
 
-  const page = toPage(types, ks.limit, (row) => row.key, '');
+  const page = toPage(types, ks.limit, (row) => row.key, '', {
+    isPrev: ks.isPrev,
+    hasCursor: ks.hasCursor,
+  });
   if (page.data.length === 0) {
     return { data: [], page: page.page };
   }

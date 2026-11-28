@@ -96,6 +96,8 @@ export interface KeysetResult {
   limitPlusOne: number;
   whereClause: SQL | undefined;
   fingerprint: string;
+  isPrev: boolean;
+  hasCursor: boolean;
 }
 
 export function keyset<TCol extends AnyPgColumn>(options: KeysetOptions<TCol>): KeysetResult {
@@ -116,18 +118,25 @@ export function keyset<TCol extends AnyPgColumn>(options: KeysetOptions<TCol>): 
       limitPlusOne: limit + 1,
       whereClause: undefined,
       fingerprint,
+      isPrev: false,
+      hasCursor: false,
     };
   }
 
   const payload = decodeCursor(options.cursor, fingerprint, options.validateKey);
   const keyValue = options.parseKey ? options.parseKey(payload.k) : payload.k;
-  const whereClause = direction === 'desc' ? lt(options.key, keyValue) : gt(options.key, keyValue);
+  const isPrev = payload.d === 'prev';
+  const effectiveDirection = isPrev ? (direction === 'desc' ? 'asc' : 'desc') : direction;
+  const whereClause =
+    effectiveDirection === 'desc' ? lt(options.key, keyValue) : gt(options.key, keyValue);
 
   return {
     limit,
     limitPlusOne: limit + 1,
     whereClause,
     fingerprint,
+    isPrev,
+    hasCursor: true,
   };
 }
 
@@ -136,18 +145,46 @@ export function toPage<T>(
   limit: number,
   keyFn: (row: T) => string,
   fingerprint = '',
+  opts: { isPrev?: boolean; hasCursor?: boolean } = {},
 ): Page<T> {
+  const isPrev = opts.isPrev ?? false;
+  const hasCursor = opts.hasCursor ?? false;
+
+  if (isPrev) {
+    const hasMorePrev = rows.length > limit;
+    const sliced = (hasMorePrev ? rows.slice(0, limit) : [...rows]).reverse();
+    const firstRow = sliced[0];
+    const lastRow = sliced.at(-1);
+    const prevCursor =
+      hasMorePrev && firstRow !== undefined
+        ? encodeCursor({ v: 1, k: keyFn(firstRow), d: 'prev', f: fingerprint })
+        : null;
+    const nextCursor =
+      lastRow !== undefined
+        ? encodeCursor({ v: 1, k: keyFn(lastRow), d: 'next', f: fingerprint })
+        : null;
+    return {
+      data: sliced,
+      page: {
+        limit,
+        hasMore: nextCursor !== null,
+        nextCursor,
+        prevCursor,
+      },
+    };
+  }
+
   const hasMore = rows.length > limit;
   const data = hasMore ? rows.slice(0, limit) : [...rows];
+  const firstRow = data[0];
   const lastRow = data.at(-1);
   const nextCursor =
     hasMore && lastRow !== undefined
-      ? encodeCursor({
-          v: 1,
-          k: keyFn(lastRow),
-          d: 'next',
-          f: fingerprint,
-        })
+      ? encodeCursor({ v: 1, k: keyFn(lastRow), d: 'next', f: fingerprint })
+      : null;
+  const prevCursor =
+    hasCursor && firstRow !== undefined
+      ? encodeCursor({ v: 1, k: keyFn(firstRow), d: 'prev', f: fingerprint })
       : null;
 
   return {
@@ -156,6 +193,7 @@ export function toPage<T>(
       limit,
       hasMore,
       nextCursor,
+      prevCursor,
     },
   };
 }

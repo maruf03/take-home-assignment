@@ -1,7 +1,7 @@
 import type { TextRanges } from '@app/contracts/dto';
 import type { Page } from '@app/contracts/page';
 import type { VersionOrigin, VersionStatus, VersionWarning } from '@app/contracts/status';
-import { and, desc, eq, isNull, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, lt, sql, type SQL } from 'drizzle-orm';
 import { DbRepoError, type AppTransaction, type DbTx } from '../client.js';
 import { documents, documentVersions } from '../schema/documents.js';
 import {
@@ -390,8 +390,11 @@ export async function listVersions(
     .select()
     .from(documentVersions)
     .where(and(...conditions))
-    .orderBy(desc(documentVersions.versionNumber))
+    .orderBy(ks.isPrev ? asc(documentVersions.versionNumber) : desc(documentVersions.versionNumber))
     .limit(ks.limitPlusOne);
 
-  return toPage(rows, ks.limit, (row) => String(row.versionNumber), fingerprint);
+  return toPage(rows, ks.limit, (row) => String(row.versionNumber), fingerprint, {
+    isPrev: ks.isPrev,
+    hasCursor: ks.hasCursor,
+  });
 }

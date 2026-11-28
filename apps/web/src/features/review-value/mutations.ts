@@ -71,8 +71,19 @@ export function applyOptimisticReview(
   const existing = doc.values.find((v) => v.id === variables.valueId);
   if (!existing) return doc;
 
-  const nextState: ValueViewDto['reviewState'] =
-    variables.body.decision === 'correct' ? 'corrected' : 'approved';
+  const isRevert = variables.body.decision === 'revert';
+  const nextState: ValueViewDto['reviewState'] = isRevert
+    ? 'pending'
+    : variables.body.decision === 'correct'
+      ? 'corrected'
+      : 'approved';
+  const nextAttention: ValueViewDto['attention'] = isRevert
+    ? existing.changeKind === 'changed'
+      ? 'changed'
+      : existing.kind === 'gap'
+        ? 'gap'
+        : 'pending'
+    : 'done';
   const nextEffective =
     variables.body.decision === 'correct' && variables.optimisticCorrectedValue !== undefined
       ? variables.optimisticCorrectedValue
@@ -81,7 +92,7 @@ export function applyOptimisticReview(
   const updatedValue: ValueViewDto = {
     ...existing,
     reviewState: nextState,
-    attention: 'done',
+    attention: nextAttention,
     effectiveValue: nextEffective,
     review: existing.review
       ? {

@@ -245,4 +245,95 @@ describe('DocumentDetailPage, TextPane, PDF download, and polling', () => {
       expect(calls).toBe(settledCalls);
     });
   });
+
+  it('[I11] keeps row order frozen after approve until Re-sort, shows 8s Undo toast that posts revert, and supports keyboard shortcuts with toggle', async () => {
+    const user = userEvent.setup();
+    const requests: Array<{ decision: string; expectedCurrentReviewId?: string | null }> = [];
+    let currentDetail = makeSampleDocumentDetail();
+
+    server.use(
+      http.get(`/api/documents/${DOC_ID_1}`, () => HttpResponse.json(currentDetail)),
+      http.post('/api/values/:valueId/review', async ({ params, request }) => {
+        const body = (await request.json()) as {
+          decision: 'approve' | 'correct' | 'revert';
+          expectedCurrentReviewId?: string | null;
+        };
+        requests.push({
+          decision: body.decision,
+          expectedCurrentReviewId: body.expectedCurrentReviewId,
+        });
+        const target = currentDetail.values.find((v) => v.id === params['valueId'])!;
+        const nextReview = {
+          id:
+            body.decision === 'revert'
+              ? '01950000-0000-7000-8000-000000000999'
+              : '01950000-0000-7000-8000-000000000888',
+          decision: body.decision,
+          correctedValue: null,
+          note: null,
+          origin: 'human' as const,
+          carriedFromVersion: null,
+          createdAt: '2026-11-27T12:05:00.000Z',
+        };
+        const updatedValue = {
+          ...target,
+          reviewState: body.decision === 'revert' ? ('pending' as const) : ('approved' as const),
+          attention: body.decision === 'revert' ? ('changed' as const) : ('done' as const),
+          review: nextReview,
+        };
+        currentDetail = {
+          ...currentDetail,
+          values: currentDetail.values.map((v) => (v.id === target.id ? updatedValue : v)),
+        };
+        return HttpResponse.json({
+          value: updatedValue,
+          progress: currentDetail.progress,
+        });
+      }),
+    );
+
+    renderDetail(`/documents/${DOC_ID_1}`);
+    expect(await screen.findByText('Total Amount')).toBeInTheDocument();
+
+    // Press '?' to open shortcuts dialog, then Esc to close
+    await user.keyboard('?');
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
+
+    // Enable Freeze order, then press 'a' to approve first selected value ('Total Amount')
+    await user.click(screen.getByRole('button', { name: /Freeze order: Off/i }));
+    expect(screen.getByRole('button', { name: /Freeze order: On/i })).toBeInTheDocument();
+    await user.keyboard('a');
+    expect(await screen.findByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    expect(requests[0]?.decision).toBe('approve');
+
+    // Row order stays frozen so Re-sort button appears
+    const resortBtn = await screen.findByRole('button', { name: 'Re-sort' });
+    expect(resortBtn).toBeInTheDocument();
+
+    // Click Undo in the toast -> posts decision:'revert'
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(requests).toHaveLength(2);
+    });
+    expect(requests[1]).toEqual({
+      decision: 'revert',
+      expectedCurrentReviewId: '01950000-0000-7000-8000-000000000888',
+    });
+
+    // Shortcuts are inert inside <input> (typing 'a' in note input does NOT fire approve)
+    await user.keyboard('c');
+    const noteInput = await screen.findByLabelText(/Note/i);
+    await user.click(noteInput);
+    await user.keyboard('a');
+    expect(requests).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // Toggle shortcuts off -> pressing 'a' no longer triggers approve
+    await user.click(screen.getByRole('button', { name: /Shortcuts: On/i }));
+    expect(screen.getByRole('button', { name: /Shortcuts: Off/i })).toBeInTheDocument();
+    await user.keyboard('a');
+    expect(requests).toHaveLength(2);
+  });
 });

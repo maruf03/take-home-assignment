@@ -5,12 +5,13 @@ export const MIN_PAGE_LIMIT = 1;
 export const MAX_PAGE_LIMIT = 100;
 export const MAX_CURSOR_LENGTH = 512;
 
-// Core pagination is forward-only (spec §15.3 overrides §7.2: no prevCursor in Core).
+// Bidirectional keyset pagination (nextCursor + prevCursor).
 export const pageMetaSchema = z
   .object({
     limit: z.number().int().min(MIN_PAGE_LIMIT).max(MAX_PAGE_LIMIT),
     hasMore: z.boolean(),
     nextCursor: z.string().min(1).max(MAX_CURSOR_LENGTH).nullable(),
+    prevCursor: z.string().min(1).max(MAX_CURSOR_LENGTH).nullable().default(null),
   })
   .strict();
 
@@ -56,7 +57,7 @@ export const cursorPayloadSchema = z
   .object({
     v: z.literal(1),
     k: z.string().min(1).max(128),
-    d: z.literal('next'),
+    d: z.enum(['next', 'prev']),
     f: z.string().max(128),
   })
   .strict();

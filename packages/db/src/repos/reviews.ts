@@ -2,7 +2,7 @@ import type { Progress } from '@app/contracts/dto';
 import type { Page } from '@app/contracts/page';
 import type { FieldType, ReviewDecision, ReviewOrigin } from '@app/contracts/status';
 import { equalValues, type TypedValue } from '@app/contracts/values';
-import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { DbRepoError, type AppTransaction, type DbTx } from '../client.js';
 import { documents, documentVersions } from '../schema/documents.js';
 import { extractedValues, reviews } from '../schema/values.js';
@@ -332,8 +332,11 @@ export async function listReviewsForValue(
     .select()
     .from(reviews)
     .where(and(...conditions))
-    .orderBy(desc(reviews.id))
+    .orderBy(ks.isPrev ? asc(reviews.id) : desc(reviews.id))
     .limit(ks.limitPlusOne);
 
-  return toPage(rows, ks.limit, (row) => row.id, fingerprint);
+  return toPage(rows, ks.limit, (row) => row.id, fingerprint, {
+    isPrev: ks.isPrev,
+    hasCursor: ks.hasCursor,
+  });
 }
