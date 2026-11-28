@@ -1,0 +1,384 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '24'
+  SCARF_ANALYTICS: 'false'
+
+jobs:
+  check:
+    name: Lint, Typecheck, Build & Unit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm db:check
+      - run: pnpm build
+      - run: pnpm exec turbo run lint typecheck
+      - name: Run unit tests (JUnit)
+        run: |
+          mkdir -p test-results/junit
+          rc=0
+          for filter in @app/config @app/contracts @app/core @app/pdf @app/llm @app/storage @app/db @app/testkit @app/worker @app/api @app/web; do
+            name="${filter#@app/}"
+            pnpm --filter "$filter" test --reporter=default --reporter=junit --outputFile="$PWD/test-results/junit/${name}-unit.xml" || rc=1
+          done
+          exit "$rc"
+      - run: pnpm audit --prod --audit-level=high
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: junit-unit
+          path: test-results/junit/
+
+  integration:
+    name: Integration, Concurrency, Security & Chaos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:18@sha256:64c8b0d31e4ab6ea665e8426ea406a94bf52de3c05b3a4a8bf713704eefa9328
+        env:
+          POSTGRES_DB: lomi
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: dev-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -h 127.0.0.1 -U postgres -d lomi"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-int-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-int-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Initialize Postgres roles
+        env:
+          PGHOST: 127.0.0.1
+          PGPASSWORD: dev-postgres
+          POSTGRES_DB: lomi
+          POSTGRES_USER: postgres
+          POSTGRES_MIGRATOR_PASSWORD: dev-migrator
+          POSTGRES_APP_PASSWORD: dev-app
+        run: bash infra/postgres/init/01-roles.sh
+
+      - name: Start Redis (6379) and Chaos Redis (6380)
+        run: |
+          docker run -d --name redis-int -p 127.0.0.1:6379:6379 \
+            redis:8@sha256:56a1737794e36c3ebe8a4544a8ab421af3ab1a6488fb2238aec228c404933fed \
+            redis-server --save "" --appendonly no --maxmemory-policy noeviction --requirepass dev-redis
+          docker run -d --name redis-chaos -p 127.0.0.1:6380:6379 \
+            redis:8@sha256:56a1737794e36c3ebe8a4544a8ab421af3ab1a6488fb2238aec228c404933fed \
+            redis-server --save "" --appendonly no --maxmemory-policy noeviction --requirepass dev-redis
+          for c in redis-int redis-chaos; do
+            for i in $(seq 1 30); do
+              if docker exec "$c" redis-cli -a dev-redis ping 2>/dev/null | grep -q PONG; then
+                break
+              fi
+              sleep 1
+            done
+            docker exec "$c" redis-cli -a dev-redis ping | grep -q PONG
+          done
+
+      - name: Install and start AWS Emulator
+        run: |
+          deb=$(mktemp -d)/aws-emulator.deb
+          curl -fsSLo "$deb" https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS/latest/aws-emulator_amd64.deb
+          sudo apt-get update && sudo apt-get install -y "$deb"
+          echo "/opt/aws-emulator/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.aws/emulator"
+          nohup /opt/aws-emulator/bin/aws-emulator -p 9297 -t off > "$HOME/.aws/emulator/9297.log" 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf --cacert "$HOME/.aws/emulator/9297/ca.pem" https://127.0.0.1:9297/__admin/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -sf --cacert "$HOME/.aws/emulator/9297/ca.pem" https://127.0.0.1:9297/__admin/health
+          KEY_ID=$(awk -F' = ' '/aws_access_key_id/{print $2; exit}' "$HOME/.aws/emulator/9297/emulator_credentials")
+          SECRET_KEY=$(awk -F' = ' '/aws_secret_access_key/{print $2; exit}' "$HOME/.aws/emulator/9297/emulator_credentials")
+          test -n "$KEY_ID" && test -n "$SECRET_KEY"
+          {
+            echo "S3_ENDPOINT=https://127.0.0.1:9297"
+            echo "S3_REGION=us-west-2"
+            echo "NODE_EXTRA_CA_CERTS=$HOME/.aws/emulator/9297/ca.pem"
+            echo "AWS_SHARED_CREDENTIALS_FILE=$HOME/.aws/emulator/9297/emulator_credentials"
+            echo "AWS_REGION=us-west-2"
+            echo "AWS_EC2_METADATA_DISABLED=true"
+            echo "S3_ACCESS_KEY=$KEY_ID"
+            echo "S3_SECRET_KEY=$SECRET_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Run integration, concurrency, security & chaos tests (JUnit)
+        env:
+          APP_ENV: test
+          REDIS_CHAOS_URL: redis://:dev-redis@127.0.0.1:6380
+        run: |
+          mkdir -p test-results/junit
+          rc=0
+          for filter in @app/storage @app/db @app/worker @app/api; do
+            name="${filter#@app/}"
+            pnpm --filter "$filter" test:int --reporter=default --reporter=junit --outputFile="$PWD/test-results/junit/${name}-int.xml" || rc=1
+          done
+          pnpm --filter @app/worker test:chaos --reporter=default --reporter=junit --outputFile="$PWD/test-results/junit/worker-chaos.xml" || rc=1
+          exit "$rc"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: aws-emulator-log
+          path: ~/.aws/emulator/9297.log
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: junit-int
+          path: test-results/junit/
+
+  images:
+    name: Build Docker Images (${{ matrix.app }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: api
+            dockerfile: Dockerfile
+            build_arg: APP=api
+            image: take-home-api:ci
+          - app: worker
+            dockerfile: Dockerfile
+            build_arg: APP=worker
+            image: take-home-worker:ci
+          - app: web
+            dockerfile: apps/web/Dockerfile
+            build_arg: VITE_API_BASE=/api
+            image: take-home-web:ci
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_arg }}
+          tags: ${{ matrix.image }}
+          load: true
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+      - name: Save image tar
+        env:
+          IMAGE: ${{ matrix.image }}
+          APP_NAME: ${{ matrix.app }}
+        run: docker save "$IMAGE" -o "/tmp/image-${APP_NAME}.tar"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-${{ matrix.app }}
+          path: /tmp/image-${{ matrix.app }}.tar
+          retention-days: 1
+
+  compose-smoke:
+    name: Compose Keyless Smoke & FLUSHALL Recovery
+    runs-on: ubuntu-24.04
+    needs: [images]
+    permissions:
+      contents: read
+    env:
+      COMPOSE_PROJECT_NAME: take-home-assignment
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: image-*
+          path: /tmp/images
+          merge-multiple: true
+
+      - name: Load images and tag compose services
+        run: |
+          for tar in /tmp/images/image-*.tar; do docker load -i "$tar"; done
+          docker tag take-home-api:ci take-home-assignment-migrate:latest
+          docker tag take-home-api:ci take-home-assignment-api:latest
+          docker tag take-home-worker:ci take-home-assignment-worker:latest
+          docker tag take-home-web:ci take-home-assignment-web:latest
+
+      - name: Run keyless compose smoke + FLUSHALL recovery
+        run: |
+          set -euo pipefail
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then docker compose logs; fi; docker compose down -v' EXIT
+          docker compose up -d --wait --no-build
+
+          # Wait for seeded doc to reach failed LLM_NOT_CONFIGURED (run 1)
+          DOC_ID=$(curl -sf http://127.0.0.1:3000/documents | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.data[0].id)")
+          for i in $(seq 1 40); do
+            STATUS=$(curl -sf "http://127.0.0.1:3000/documents/${DOC_ID}" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(d.status + ':' + (d.currentVersion.error?.code||''))")
+            if [ "$STATUS" = "failed:LLM_NOT_CONFIGURED" ]; then break; fi
+            sleep 1
+          done
+          test "$STATUS" = "failed:LLM_NOT_CONFIGURED"
+
+          # Stop worker -> retry v1 -> FLUSHALL -> start worker -> expect runNumber=2 failed LLM_NOT_CONFIGURED
+          docker compose stop worker
+          curl -sf -X POST "http://127.0.0.1:3000/documents/${DOC_ID}/versions/1/retry" \
+            -H "Idempotency-Key: compose-smoke-retry-1" >/dev/null
+          docker compose exec -T redis redis-cli -a dev-redis FLUSHALL
+          docker compose start worker
+          for i in $(seq 1 60); do
+            RUN_STATE=$(curl -sf "http://127.0.0.1:3000/documents/${DOC_ID}/versions/1/runs" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8')); const r=d.data.find(x=>x.runNumber===2); console.log(r ? r.status+':'+(r.errorCode||'') : 'none')")
+            if [ "$RUN_STATE" = "failed:LLM_NOT_CONFIGURED" ]; then break; fi
+            sleep 1
+          done
+          test "$RUN_STATE" = "failed:LLM_NOT_CONFIGURED"
+
+  e2e:
+    name: Playwright E2E + Axe
+    runs-on: ubuntu-24.04
+    needs: [images]
+    permissions:
+      contents: read
+    env:
+      COMPOSE_PROJECT_NAME: take-home-assignment
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: image-*
+          path: /tmp/images
+          merge-multiple: true
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install chromium
+      - run: pnpm exec playwright install-deps chromium
+
+      - name: Run Playwright E2E against compose e2e stack
+        run: |
+          set -euo pipefail
+          for tar in /tmp/images/image-*.tar; do docker load -i "$tar"; done
+          docker tag take-home-api:ci take-home-assignment-migrate:latest
+          docker tag take-home-api:ci take-home-assignment-api:latest
+          docker tag take-home-worker:ci take-home-assignment-worker:latest
+          docker tag take-home-web:ci take-home-assignment-web:latest
+
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then docker compose -f compose.yaml -f compose.e2e.yaml logs; fi; docker compose -f compose.yaml -f compose.e2e.yaml down -v' EXIT
+          docker compose -f compose.yaml -f compose.e2e.yaml up -d --wait --no-build
+          mkdir -p junit-results
+          E2E_BASE_URL=http://127.0.0.1:8080 PLAYWRIGHT_JUNIT_OUTPUT=junit-results/e2e.xml pnpm test:e2e
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: junit-e2e
+          path: junit-results/
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+
+  trace-check:
+    name: Traceability Matrix Gate
+    runs-on: ubuntu-24.04
+    needs: [check, integration, compose-smoke, e2e]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: junit-*
+          path: test-results/junit
+          merge-multiple: true
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm trace:check --junit test-results/junit
