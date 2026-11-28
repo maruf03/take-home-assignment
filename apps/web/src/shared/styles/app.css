@@ -1,0 +1,92 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f7f8fa;
+  --color-ink: #111827;
+  --color-ink-muted: #4b5563;
+  --color-border: #d1d5db;
+  --color-accent: #1d4ed8;
+  --color-accent-hover: #1e40af;
+  --color-attention: #92400e;
+  --color-attention-bg: #fef3c7;
+  --color-gap: #991b1b;
+  --color-gap-bg: #fee2e2;
+  --color-done: #166534;
+  --color-done-bg: #dcfce7;
+  --color-corrected: #5b21b6;
+  --color-corrected-bg: #ede9fe;
+  --color-mark: #fde047;
+  --color-mark-outline: #a16207;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.evidence-mark {
+  background-color: var(--color-mark);
+  color: var(--color-ink);
+  outline: 2px solid var(--color-mark-outline);
+  border-radius: 2px;
+  padding-inline: 2px;
+}
+
+.evidence-other-occurrence {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--color-attention);
+}
+
+.text-low-visibility {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--color-ink-muted);
+  color: var(--color-ink-muted);
+}
+
+.text-hidden-pdf {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    #f3f4f6,
+    #f3f4f6 6px,
+    #e5e7eb 6px,
+    #e5e7eb 12px
+  );
+  color: #374151;
+  border: 1px dashed #9ca3af;
+  border-radius: 2px;
+  padding-inline: 4px;
+}
