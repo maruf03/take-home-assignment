@@ -1,6 +1,6 @@
 # Runbook: restore a deleted document
 
-> **Status:** Soft delete and restore (`GET /documents?deleted=only`, `POST /documents/:id/restore`) are **Extended E1a** and are not implemented in Core. In Core, `?deleted=only` returns `400 VALIDATION_FAILED` and `/restore` returns `404 ROUTE_NOT_FOUND`.
+> **Status:** Soft delete and restore (`GET /documents?deleted=only`, `POST /documents/:id/restore`) are **Extended E1a** and are not implemented in Core. In Core, `?deleted=only` returns `400 INVALID_FILTER` and `/restore` returns `404 ROUTE_NOT_FOUND`.
 
 1. Find it with `GET /documents?deleted=only` (Trash tab).
 2. `POST /documents/:id/restore`. The response is 200 with the document, and is a no-op if the document is already live.
