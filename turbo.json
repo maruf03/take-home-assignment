@@ -24,6 +24,8 @@
         "test/**",
         "$TURBO_ROOT$/fixtures/**",
         "$TURBO_ROOT$/fixtures-golden/**",
+        "$TURBO_ROOT$/docs/reference/traceability.md",
+        "$TURBO_ROOT$/scripts/trace-check.ts",
         "$TURBO_ROOT$/eslint.config.js",
         "$TURBO_ROOT$/commitlint.config.js"
       ],
@@ -58,6 +60,7 @@
         "POSTGRES_USER",
         "POSTGRES_PASSWORD",
         "REDIS_URL*",
+        "REDIS_CHAOS_URL",
         "S3_*",
         "AWS_*",
         "LLM_PROVIDER",

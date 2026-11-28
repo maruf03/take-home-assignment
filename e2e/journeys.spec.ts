@@ -12,7 +12,11 @@ test.describe('Core E2E journeys with axe accessibility checks', () => {
 
     await page.goto('/documents?view=needs-review&pollMs=250');
     await expect(page.getByRole('heading', { name: 'Documents' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: /Needs review/i })).toBeVisible();
+    // [I12] Needs review count is above the fold once facets load
+    const needsReviewTab = page.getByRole('tab', { name: /Needs review/i });
+    await expect(needsReviewTab).toBeVisible();
+    await expect(needsReviewTab).toHaveText(/Needs review\s*(\d+|99\+)/);
+    await expect(needsReviewTab).toBeInViewport();
     await expectZeroSeriousAxe(page, 'Documents queue (Needs review)');
 
     const docId = await uploadPdfViaDialog(page, {
@@ -104,16 +108,20 @@ test.describe('Core E2E journeys with axe accessibility checks', () => {
     await page.goto(`/documents/${docId}?pollMs=250`);
 
     // Assert Changed group is first with exactly 2 items and Done has 3 carried items
-    const sectionHeadings = await page.locator('section[id^="group-"] h2').allTextContents();
-    expect(sectionHeadings[0]).toMatch(/Changed since v1\s*\(2\)/i);
-    expect(sectionHeadings[3]).toMatch(/Done\s*\(3\)/i);
+    await expect(page.getByRole('heading', { level: 2 })).toHaveText([
+      /Changed since v1\s*\(2\)/i,
+      /Gaps\s*\(0\)/i,
+      /Needs review\s*\(0\)/i,
+      /Done\s*\(3\)/i,
+    ]);
 
     const totalRow = page.getByRole('group', { name: 'Total Amount' });
     await expect(totalRow).toBeVisible();
     await expect(totalRow.getByText(/Previous \(v1\)/i)).toBeVisible();
+    await expect(totalRow.getByText(/Previous review:\s*Approved/i)).toBeVisible();
     await expect(totalRow.getByText(/\$5,230\.29/).first()).toBeVisible();
-    await expect(totalRow.locator('del')).toBeVisible();
-    await expect(totalRow.locator('ins')).toBeVisible();
+    await expect(totalRow.getByRole('deletion')).toBeVisible();
+    await expect(totalRow.getByRole('insertion')).toBeVisible();
 
     await expect(page.getByRole('group', { name: 'Due Date' })).toBeVisible();
 
@@ -157,13 +165,22 @@ test.describe('Core E2E journeys with axe accessibility checks', () => {
     await doneGapRow.getByRole('button', { name: 'Enter value' }).click();
 
     await doneGapRow.getByLabel('Amount').fill('$85,000');
-    await expect(doneGapRow.getByTestId('canonical-preview')).toContainText(
-      /Will save as:\s*\$85,000\.00/i,
-    );
+    await expect(doneGapRow.getByText(/Will save as:\s*\$85,000\.00/i)).toBeVisible();
     await doneGapRow.getByLabel('Note (optional)').fill('Verified in county census annex');
     await expectZeroSeriousAxe(page, 'Document detail (Gap correction form)');
 
-    await doneGapRow.getByRole('button', { name: 'Save', exact: true }).click();
+    const saveButton = doneGapRow.getByRole('button', { name: 'Save', exact: true });
+    const [reviewResponse] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          new URL(res.url()).pathname.endsWith('/review') &&
+          res.url().includes('/api/values/') &&
+          res.request().method() === 'POST',
+      ),
+      saveButton.click(),
+    ]);
+    expect(reviewResponse.status()).toBe(201);
+    await expect(saveButton).toBeHidden();
     await expect(doneGapRow.getByText('$85,000.00')).toBeVisible();
     await expect(doneGapRow.getByText(/Corrected/i)).toBeVisible();
     await expectZeroSeriousAxe(page, 'Document detail (Gap corrected)');

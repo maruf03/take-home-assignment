@@ -11,15 +11,19 @@ if [[ "${1:-}" == "--down" || "${CHAOS_TEARDOWN:-0}" == "1" ]]; then
   TEARDOWN=1
 fi
 
+COMPOSE=(docker compose -f compose.yaml -f compose.dev.yaml -f compose.test.yaml)
+INFRA_SERVICES=(postgres redis s3 redis-chaos)
+
 cleanup() {
   if [[ "$TEARDOWN" == "1" ]]; then
-    docker compose -f compose.yaml -f compose.dev.yaml -f compose.test.yaml down
+    "${COMPOSE[@]}" stop "${INFRA_SERVICES[@]}"
+    "${COMPOSE[@]}" rm -f -v "${INFRA_SERVICES[@]}"
   fi
 }
 trap cleanup EXIT
 
 echo "Starting infra + redis-chaos (127.0.0.1:6380)..."
-docker compose -f compose.yaml -f compose.dev.yaml -f compose.test.yaml up -d --wait
+"${COMPOSE[@]}" up -d --wait "${INFRA_SERVICES[@]}"
 
 export APP_ENV=test
 export REDIS_CHAOS_URL="${REDIS_CHAOS_URL:-redis://:dev-redis@127.0.0.1:6380}"

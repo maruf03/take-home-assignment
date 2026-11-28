@@ -98,6 +98,65 @@ describe('scripts/trace-check.ts CLI', () => {
     const dir = await makeTempDir();
     const res = await runTraceCheck(['--junit', dir]);
     expect(res.code).toBe(1);
-    expect(res.stdout).toContain('No JUnit XML files found.');
+    expect(res.stderr).toMatch(/no xml files/i);
+  });
+
+  it('ignores <failure>/<error>/<skipped>/</testcase> inside CDATA, <system-out>, <system-err>, and <flakyFailure>', async () => {
+    const dir = await makeTempDir();
+    const customMatrix = [
+      '| ID | Requirement or invariant | Tests | Tier |',
+      '|---|---|---|---|',
+      '| R1 | Upload | t1 | e2e |',
+      '| R2 | Restart | t2 | e2e |',
+    ].join('\n');
+    const matrixFile = path.join(dir, 'matrix.md');
+    await writeFile(matrixFile, customMatrix, 'utf8');
+
+    const xml = `<testsuite name="pw">
+      <testcase classname="e2e" data-name="ignored" name="[R1] passes with XML in stdout">
+        <system-out><![CDATA[Rendered <failure>fake</failure><skipped /></testcase>]]></system-out>
+        <system-err><![CDATA[<error message="not a real error" />]]></system-err>
+      </testcase>
+      <testcase classname="e2e" name="[R2] passes after retry">
+        <flakyFailure message="transient"><stackTrace><![CDATA[<failure/>]]></stackTrace></flakyFailure>
+      </testcase>
+    </testsuite>`;
+    await writeFile(path.join(dir, 'pw.xml'), xml, 'utf8');
+
+    const res = await runTraceCheck(['--matrix', matrixFile, '--junit', dir]);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('| R1 | Core | PASS | 1 | 0 | 0 |');
+    expect(res.stdout).toContain('| R2 | Core | PASS | 1 | 0 | 0 |');
+  });
+
+  it('fails fast on missing explicit --junit path or unknown CLI flag', async () => {
+    const dir = await makeTempDir();
+    const customMatrix = [
+      '| ID | Requirement or invariant | Tests | Tier |',
+      '|---|---|---|---|',
+      '| R1 | Upload | t1 | e2e |',
+    ].join('\n');
+    const matrixFile = path.join(dir, 'matrix.md');
+    await writeFile(matrixFile, customMatrix, 'utf8');
+    await writeFile(
+      path.join(dir, 'ok.xml'),
+      '<testsuite><testcase classname="s" name="[R1] ok" /></testsuite>',
+      'utf8',
+    );
+
+    const missingRes = await runTraceCheck([
+      '--matrix',
+      matrixFile,
+      '--junit',
+      path.join(dir, 'ok.xml'),
+      '--junit',
+      path.join(dir, 'does-not-exist.xml'),
+    ]);
+    expect(missingRes.code).toBe(1);
+    expect(missingRes.stderr).toMatch(/does-not-exist\.xml/i);
+
+    const unknownRes = await runTraceCheck(['--bogus']);
+    expect(unknownRes.code).toBe(1);
+    expect(unknownRes.stderr).toMatch(/unknown argument/i);
   });
 });

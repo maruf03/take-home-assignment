@@ -54,8 +54,27 @@ export function parseTraceabilityMatrix(markdown: string): MatrixRequirement[] {
   return rows;
 }
 
+/**
+ * Removes XML regions that may legitimately contain arbitrary text resembling outcome tags:
+ * comments, CDATA, stdout/stderr, properties, and Playwright retry bookkeeping elements.
+ */
+function stripNonOutcomeXml(xml: string): string {
+  return xml
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '')
+    .replace(/<system-out\b[\s\S]*?<\/system-out>/g, '')
+    .replace(/<system-err\b[\s\S]*?<\/system-err>/g, '')
+    .replace(/<properties\b[\s\S]*?<\/properties>/g, '')
+    .replace(/<flakyFailure\b[\s\S]*?<\/flakyFailure>/g, '')
+    .replace(/<flakyError\b[\s\S]*?<\/flakyError>/g, '')
+    .replace(/<rerunFailure\b[\s\S]*?<\/rerunFailure>/g, '')
+    .replace(/<rerunError\b[\s\S]*?<\/rerunError>/g, '');
+}
+
 function decodeXmlEntities(text: string): string {
   return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
     .replaceAll('&quot;', '"')
     .replaceAll('&apos;', "'")
     .replaceAll('&lt;', '<')
@@ -64,10 +83,10 @@ function decodeXmlEntities(text: string): string {
 }
 
 function readAttr(attrs: string, attrName: string): string {
-  const doubleRe = new RegExp(`\\b${attrName}\\s*=\\s*"([^"]*)"`);
+  const doubleRe = new RegExp(`(?<![\\w-])${attrName}\\s*=\\s*"([^"]*)"`);
   const m1 = doubleRe.exec(attrs);
   if (m1?.[1] !== undefined) return decodeXmlEntities(m1[1]);
-  const singleRe = new RegExp(`\\b${attrName}\\s*=\\s*'([^']*)'`);
+  const singleRe = new RegExp(`(?<![\\w-])${attrName}\\s*=\\s*'([^']*)'`);
   const m2 = singleRe.exec(attrs);
   if (m2?.[1] !== undefined) return decodeXmlEntities(m2[1]);
   return '';
@@ -86,8 +105,8 @@ function extractIds(text: string): string[] {
  */
 export function parseJunitXml(xml: string): ParsedTestCase[] {
   const results: ParsedTestCase[] = [];
-  const tagRegex = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
-  for (const match of xml.matchAll(tagRegex)) {
+  const tagRegex = /<testcase\b((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+  for (const match of stripNonOutcomeXml(xml).matchAll(tagRegex)) {
     const attrs = match[1] ?? '';
     const inner = match[2] ?? '';
     const name = readAttr(attrs, 'name');
@@ -234,19 +253,34 @@ async function runCli(argv: readonly string[]): Promise<number> {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
-    if (arg === '--matrix' && argv[i + 1]) {
-      matrixPath = path.resolve(argv[i + 1]!);
-      i += 1;
-    } else if (arg === '--junit' && argv[i + 1]) {
-      junitInputs.push(path.resolve(argv[i + 1]!));
+    if (arg === '--matrix' || arg === '--junit') {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('--')) {
+        process.stderr.write(`trace-check: missing value for ${arg}\n`);
+        return 1;
+      }
+      if (arg === '--matrix') matrixPath = path.resolve(value);
+      else junitInputs.push(path.resolve(value));
       i += 1;
     } else if (arg === '--include-extended') {
       includeExtended = true;
+    } else {
+      process.stderr.write(`trace-check: unknown argument "${arg}"\n`);
+      return 1;
     }
   }
 
-  if (junitInputs.length === 0) {
+  const explicitJunit = junitInputs.length > 0;
+  if (!explicitJunit) {
     junitInputs.push(path.join(repoRoot, 'test-results'));
+  } else {
+    for (const input of junitInputs) {
+      const files = await collectXmlFiles(input);
+      if (files.length === 0) {
+        process.stderr.write(`trace-check: --junit path has no XML files: ${input}\n`);
+        return 1;
+      }
+    }
   }
 
   const matrixMd = await readFile(matrixPath, 'utf8');
