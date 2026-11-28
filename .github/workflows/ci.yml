@@ -49,6 +49,7 @@ jobs:
       - name: Check OpenAPI snapshot is up to date
         run: |
           pnpm --filter @app/api exec node dist/src/generate-openapi.js
+          pnpm exec prettier --write docs/reference/openapi.json
           git diff --exit-code -- docs/reference/openapi.json
       - name: Check API contract breaking changes (oasdiff)
         if: github.event_name == 'pull_request'
