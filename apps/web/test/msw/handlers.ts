@@ -1,13 +1,17 @@
 import {
+  createVersionResponseDtoSchema,
   documentDetailDtoSchema,
   documentsFacetsDtoSchema,
   documentSummaryDtoSchema,
   documentTypeDtoSchema,
+  reviewResponseDtoSchema,
   versionDetailDtoSchema,
+  versionSummaryDtoSchema,
   type DocumentDetailDto,
   type DocumentsFacetsDto,
   type DocumentSummaryDto,
   type DocumentTypeDto,
+  type ValueViewDto,
   type VersionDetailDto,
 } from '@app/contracts/dto';
 import type { ProblemDetails } from '@app/contracts/problems';
@@ -378,6 +382,101 @@ export const defaultHandlers = [
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     }),
   ),
+  http.post('/api/values/:id/review', async ({ params, request }) => {
+    const body = (await request.json()) as {
+      decision: 'approve' | 'correct';
+      correctedValue?: ValueViewDto['effectiveValue'];
+      note?: string;
+    };
+    const detail = makeSampleDocumentDetail();
+    const existing = detail.values.find((v) => v.id === params['id']) ?? detail.values[0]!;
+    const updated: ValueViewDto = {
+      ...existing,
+      reviewState: body.decision === 'correct' ? 'corrected' : 'approved',
+      attention: 'done',
+      effectiveValue:
+        body.decision === 'correct' && body.correctedValue !== undefined
+          ? body.correctedValue
+          : existing.value,
+      review: {
+        id: '01950000-0000-7000-8000-000000000901',
+        decision: body.decision,
+        correctedValue:
+          body.decision === 'correct' && body.correctedValue !== undefined
+            ? body.correctedValue
+            : null,
+        note: body.note ?? null,
+        origin: 'human',
+        carriedFromVersion: null,
+        createdAt: '2026-11-27T11:00:00.000Z',
+      },
+    };
+    return HttpResponse.json(
+      reviewResponseDtoSchema.parse({
+        value: updated,
+        progress: {
+          ...detail.progress,
+          pending: Math.max(0, detail.progress.pending - 1),
+          approved: detail.progress.approved + (body.decision === 'approve' ? 1 : 0),
+          corrected: detail.progress.corrected + (body.decision === 'correct' ? 1 : 0),
+        },
+      }),
+      { status: 201 },
+    );
+  }),
+  http.post('/api/documents/:id/versions', () => {
+    const summary = makeSampleDocumentSummary();
+    const newVersion = versionSummaryDtoSchema.parse({
+      ...summary.currentVersion,
+      number: summary.currentVersion.number + 1,
+      status: 'queued',
+      extractedAt: null,
+      reviewable: false,
+    });
+    return HttpResponse.json(
+      createVersionResponseDtoSchema.parse({
+        document: {
+          ...summary,
+          status: 'queued',
+          currentVersion: newVersion,
+        },
+        version: newVersion,
+      }),
+      { status: 201 },
+    );
+  }),
+  http.post('/api/documents/:id/versions/:n/retry', ({ params }) => {
+    const summary = makeSampleDocumentSummary();
+    return HttpResponse.json(
+      versionSummaryDtoSchema.parse({
+        ...summary.currentVersion,
+        number: Number(params['n']),
+        status: 'queued',
+        error: null,
+        attempts: 0,
+        extractedAt: null,
+        reviewable: false,
+      }),
+      { status: 202 },
+    );
+  }),
+  http.post('/api/documents/:id/versions/:n/reextract', ({ params }) => {
+    const summary = makeSampleDocumentSummary();
+    return HttpResponse.json(
+      versionSummaryDtoSchema.parse({
+        ...summary.currentVersion,
+        number: Number(params['n']) + 1,
+        origin: 'reextract',
+        sourceVersionNumber: Number(params['n']),
+        status: 'queued',
+        error: null,
+        attempts: 0,
+        extractedAt: null,
+        reviewable: false,
+      }),
+      { status: 201 },
+    );
+  }),
 ];
 
 export const server = setupServer(...defaultHandlers);

@@ -1,15 +1,28 @@
 import type { DocumentDetailDto, ValueViewDto } from '@app/contracts/dto';
 import { getUiCopy } from '@app/contracts/ui-copy';
+import type { TemplateValueContext } from '@app/contracts/values';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   useDocumentDetail,
+  useDocumentTypes,
   useVersionDetail,
   useVersionText,
 } from '../entities/document/queries.js';
 import { TextPane } from '../entities/document/TextPane.js';
 import { ValueRow } from '../entities/document/ValueRow.js';
-import { fileDownloadUrl } from '../shared/api/client.js';
+import { useReextractVersion } from '../features/retry/mutations.js';
+import { RetryButton } from '../features/retry/RetryButton.js';
+import { ConflictCard } from '../features/review-value/ConflictCard.js';
+import {
+  CorrectionForm,
+  initialDraftFor,
+  type CorrectionDraft,
+} from '../features/review-value/CorrectionForm.js';
+import { useReviewValue } from '../features/review-value/mutations.js';
+import { ReviewActions } from '../features/review-value/ReviewActions.js';
+import { UploadVersionDialog } from '../features/upload-version/UploadVersionDialog.js';
+import { ApiError, fileDownloadUrl } from '../shared/api/client.js';
 import { DEFAULT_POLL_MS, isStatusInFlight } from '../shared/api/polling.js';
 import { ErrorBoundary } from '../shared/ui/ErrorBoundary.js';
 import {
@@ -104,9 +117,20 @@ function DocumentDetailContent({
 
   const detailQuery = useDocumentDetail(documentId, pollMs);
   const versionQuery = useVersionDetail(documentId, isHistorical ? requestedVersion : null);
+  const typesQuery = useDocumentTypes();
 
   const doc = detailQuery.data;
   const historicalVer = versionQuery.data;
+
+  const templateCtx = useMemo<TemplateValueContext | undefined>(() => {
+    if (!doc) return undefined;
+    const match = typesQuery.data?.data.find((t) => t.key === doc.type);
+    if (!match?.template) return undefined;
+    return {
+      defaultCurrency: match.template.defaultCurrency,
+      dateOrder: match.template.dateOrder,
+    };
+  }, [doc, typesQuery.data]);
 
   const activeVersionNumber = isHistorical
     ? requestedVersion
@@ -137,6 +161,24 @@ function DocumentDetailContent({
 
   const [selectedValueId, setSelectedValueId] = useState<string | null>(null);
   const [doneExpanded, setDoneExpanded] = useState(false);
+  const [uploadVersionOpen, setUploadVersionOpen] = useState(false);
+  const [editingFieldKey, setEditingFieldKey] = useState<string | null>(null);
+  const [draftsByField, setDraftsByField] = useState<Record<string, CorrectionDraft>>({});
+  const [conflictsByValueId, setConflictsByValueId] = useState<Record<string, ValueViewDto | null>>(
+    {},
+  );
+  const [rowErrorByValueId, setRowErrorByValueId] = useState<Record<string, Error>>({});
+  const [versionMovedBanner, setVersionMovedBanner] = useState(false);
+
+  const reviewMutation = useReviewValue(documentId, {
+    onReviewConflict: (valueId, currentValue) => {
+      setConflictsByValueId((prev) => ({ ...prev, [valueId]: currentValue }));
+    },
+    onVersionNotReviewable: () => {
+      setVersionMovedBanner(true);
+    },
+  });
+  const reextractMutation = useReextractVersion(documentId);
 
   // Announce completion politely when extraction transitions from in-flight to extracted (spec §14.4).
   const wasInFlightRef = useRef(false);
@@ -159,6 +201,84 @@ function DocumentDetailContent({
     }
     return orderedValues.find((v) => v.evidence !== null) ?? orderedValues[0] ?? null;
   }, [orderedValues, selectedValueId]);
+
+  const focusNextPendingAfter = (approvedValueId: string) => {
+    const nextPending = orderedValues.find(
+      (v) => v.id !== approvedValueId && v.reviewState === 'pending',
+    );
+    if (!nextPending) return;
+    setSelectedValueId(nextPending.id);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        const nextRow = document.querySelector<HTMLElement>(
+          `[data-value-id="${nextPending.id}"] [data-review-primary="true"]`,
+        );
+        nextRow?.focus();
+      });
+    }
+  };
+
+  const handleApprove = (val: ValueViewDto) => {
+    setRowErrorByValueId((prev) => {
+      const next = { ...prev };
+      delete next[val.id];
+      return next;
+    });
+    setConflictsByValueId((prev) => {
+      const next = { ...prev };
+      delete next[val.id];
+      return next;
+    });
+
+    reviewMutation.mutate(
+      {
+        valueId: val.id,
+        fieldKey: val.fieldKey,
+        body: {
+          decision: 'approve',
+          expectedCurrentReviewId: val.review?.id ?? null,
+        },
+      },
+      {
+        onSuccess: () => {
+          setLiveNotice(`Approved ${val.label}`);
+          focusNextPendingAfter(val.id);
+        },
+        onError: (err) => {
+          if (
+            err instanceof ApiError &&
+            err.status === 409 &&
+            (err.code === 'REVIEW_CONFLICT' || err.code === 'VERSION_NOT_REVIEWABLE')
+          ) {
+            return;
+          }
+          setRowErrorByValueId((prev) => ({ ...prev, [val.id]: err }));
+        },
+      },
+    );
+  };
+
+  const handleStartEdit = (val: ValueViewDto) => {
+    setSelectedValueId(val.id);
+    setEditingFieldKey(val.fieldKey);
+    setDraftsByField((prev) =>
+      prev[val.fieldKey] ? prev : { ...prev, [val.fieldKey]: initialDraftFor(val, templateCtx) },
+    );
+    setRowErrorByValueId((prev) => {
+      const next = { ...prev };
+      delete next[val.id];
+      return next;
+    });
+  };
+
+  const handleCancelEdit = (fieldKey: string) => {
+    setEditingFieldKey(null);
+    setDraftsByField((prev) => {
+      const next = { ...prev };
+      delete next[fieldKey];
+      return next;
+    });
+  };
 
   if (invalidVersionParam) {
     return (
@@ -287,6 +407,29 @@ function DocumentDetailContent({
 
             <ProgressBar progress={progress} />
 
+            <button
+              type="button"
+              onClick={() => setUploadVersionOpen(true)}
+              className="inline-flex min-h-8 items-center rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-1 text-xs font-medium text-[var(--color-ink)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+            >
+              Upload new version
+            </button>
+
+            {!isHistorical &&
+            (doc.currentVersion.status === 'extracted' ||
+              doc.currentVersion.status === 'failed') ? (
+              <button
+                type="button"
+                disabled={reextractMutation.isPending}
+                onClick={() =>
+                  reextractMutation.mutate({ versionNumber: doc.currentVersion.number })
+                }
+                className="inline-flex min-h-8 items-center rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-subtle)] disabled:opacity-60"
+              >
+                {reextractMutation.isPending ? 'Re-extracting…' : 'Re-extract'}
+              </button>
+            ) : null}
+
             {activeVersionNumber !== null ? (
               <a
                 href={fileDownloadUrl(doc.id, activeVersionNumber)}
@@ -323,7 +466,18 @@ function DocumentDetailContent({
 
       {/* Priority banner: at most one (spec §14.2) */}
       <div className="mt-4 space-y-3">
-        {newerFailed ? (
+        {versionMovedBanner ? (
+          <Banner tone="attention" live="polite">
+            <span>{getUiCopy('problem.VERSION_NOT_REVIEWABLE')}</span>
+            <button
+              type="button"
+              onClick={() => setVersionMovedBanner(false)}
+              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-ink)]"
+            >
+              Dismiss
+            </button>
+          </Banner>
+        ) : newerFailed ? (
           <Banner tone="gap" live="polite">
             <span>
               Version v{doc.currentVersion.number} failed:{' '}
@@ -331,6 +485,9 @@ function DocumentDetailContent({
                 ? getUiCopy(`versionError.${doc.currentVersion.error.code}`)
                 : 'Extraction failed.'}
             </span>
+            {doc.currentVersion.error?.retryable !== false ? (
+              <RetryButton documentId={doc.id} versionNumber={doc.currentVersion.number} />
+            ) : null}
           </Banner>
         ) : newerExtracting ? (
           <Banner tone="accent" live="polite">
@@ -390,16 +547,26 @@ function DocumentDetailContent({
           role="alert"
           className="mt-6 rounded border border-red-300 bg-[var(--color-gap-bg)] p-6 text-[var(--color-gap)]"
         >
-          <h2 className="text-base font-semibold">Extraction failed</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink)]">
-            {failedError
-              ? getUiCopy(`versionError.${failedError.code}`)
-              : 'Extraction could not be completed.'}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold">Extraction failed</h2>
+              <p className="mt-1 text-sm text-[var(--color-ink)]">
+                {failedError
+                  ? getUiCopy(`versionError.${failedError.code}`)
+                  : 'Extraction could not be completed.'}
+              </p>
+            </div>
+            {failedError?.retryable !== false && activeVersionNumber !== null ? (
+              <RetryButton documentId={doc.id} versionNumber={activeVersionNumber} />
+            ) : null}
+          </div>
           {failedError ? (
-            <p className="mt-2 font-mono text-xs text-[var(--color-ink-muted)]">
-              Code: {failedError.code}
-            </p>
+            <details className="mt-3 text-xs text-[var(--color-ink-muted)]">
+              <summary className="cursor-pointer font-medium">Details</summary>
+              <p className="mt-1 font-mono">
+                Code: {failedError.code} · {failedError.message}
+              </p>
+            </details>
           ) : null}
         </section>
       ) : (
@@ -442,14 +609,129 @@ function DocumentDetailContent({
                     <p className="px-4 py-3 text-xs text-[var(--color-ink-muted)]">None</p>
                   ) : (
                     <div>
-                      {group.items.map((item) => (
-                        <ValueRow
-                          key={item.id}
-                          value={item}
-                          selected={selectedValue?.id === item.id}
-                          onSelect={(val) => setSelectedValueId(val.id)}
-                        />
-                      ))}
+                      {group.items.map((item) => {
+                        const isEditing = !isHistorical && editingFieldKey === item.fieldKey;
+                        const activeDraft =
+                          draftsByField[item.fieldKey] ?? initialDraftFor(item, templateCtx);
+                        const hasConflict = Object.prototype.hasOwnProperty.call(
+                          conflictsByValueId,
+                          item.id,
+                        );
+                        const rowError = rowErrorByValueId[item.id] ?? null;
+
+                        return (
+                          <ValueRow
+                            key={item.id}
+                            value={item}
+                            selected={selectedValue?.id === item.id}
+                            onSelect={(val) => setSelectedValueId(val.id)}
+                            actions={
+                              <ReviewActions
+                                value={item}
+                                readOnly={isHistorical}
+                                editing={isEditing}
+                                busy={
+                                  reviewMutation.isPending &&
+                                  reviewMutation.variables?.valueId === item.id
+                                }
+                                onApprove={() => handleApprove(item)}
+                                onStartEdit={() => handleStartEdit(item)}
+                              />
+                            }
+                            conflict={
+                              <>
+                                {hasConflict ? (
+                                  <ConflictCard
+                                    currentValue={conflictsByValueId[item.id] ?? null}
+                                    onDismiss={() =>
+                                      setConflictsByValueId((prev) => {
+                                        const next = { ...prev };
+                                        delete next[item.id];
+                                        return next;
+                                      })
+                                    }
+                                  />
+                                ) : null}
+                                {!isEditing && rowError ? (
+                                  <div
+                                    role="alert"
+                                    className="mt-2 rounded border border-red-300 bg-[var(--color-gap-bg)] px-2.5 py-1.5 text-xs text-[var(--color-gap)]"
+                                  >
+                                    {rowError instanceof ApiError
+                                      ? rowError.status === 429 &&
+                                        rowError.retryAfterSeconds !== undefined
+                                        ? `Wait ${rowError.retryAfterSeconds}s and try again.`
+                                        : getUiCopy(`problem.${rowError.code}`)
+                                      : rowError.message}
+                                  </div>
+                                ) : null}
+                              </>
+                            }
+                            editor={
+                              isEditing ? (
+                                <CorrectionForm
+                                  value={item}
+                                  templateCtx={templateCtx}
+                                  draft={activeDraft}
+                                  onDraftChange={(next) =>
+                                    setDraftsByField((prev) => ({
+                                      ...prev,
+                                      [item.fieldKey]: next,
+                                    }))
+                                  }
+                                  onCancel={() => handleCancelEdit(item.fieldKey)}
+                                  submitting={
+                                    reviewMutation.isPending &&
+                                    reviewMutation.variables?.valueId === item.id
+                                  }
+                                  serverError={rowError}
+                                  onSubmit={async ({ correctedValue, canonicalValue, note }) => {
+                                    setRowErrorByValueId((prev) => {
+                                      const next = { ...prev };
+                                      delete next[item.id];
+                                      return next;
+                                    });
+                                    try {
+                                      await reviewMutation.mutateAsync({
+                                        valueId: item.id,
+                                        fieldKey: item.fieldKey,
+                                        optimisticCorrectedValue: canonicalValue,
+                                        body: {
+                                          decision: 'correct',
+                                          correctedValue,
+                                          ...(note !== undefined ? { note } : {}),
+                                          expectedCurrentReviewId: item.review?.id ?? null,
+                                        },
+                                      });
+                                      handleCancelEdit(item.fieldKey);
+                                      setLiveNotice(`Corrected ${item.label}`);
+                                    } catch (err) {
+                                      if (
+                                        err instanceof ApiError &&
+                                        err.status === 409 &&
+                                        (err.code === 'REVIEW_CONFLICT' ||
+                                          err.code === 'VERSION_NOT_REVIEWABLE')
+                                      ) {
+                                        // Conflict card or version-moved banner handles this; preserve draft on VERSION_NOT_REVIEWABLE.
+                                        if (err.code === 'REVIEW_CONFLICT') {
+                                          handleCancelEdit(item.fieldKey);
+                                        }
+                                        return;
+                                      }
+                                      if (err instanceof Error) {
+                                        setRowErrorByValueId((prev) => ({
+                                          ...prev,
+                                          [item.id]: err,
+                                        }));
+                                      }
+                                    }
+                                  }}
+                                />
+                              ) : null
+                            }
+                          />
+                        );
+                      })}
                     </div>
                   )}
                 </section>
@@ -481,6 +763,19 @@ function DocumentDetailContent({
           </div>
         </div>
       )}
+
+      <UploadVersionDialog
+        documentId={doc.id}
+        open={uploadVersionOpen}
+        onClose={() => setUploadVersionOpen(false)}
+        onUploaded={(deduplicated, versionNumber) => {
+          setLiveNotice(
+            deduplicated
+              ? `File matches existing v${versionNumber}; no new extraction needed.`
+              : `Uploaded v${versionNumber}; extraction started.`,
+          );
+        }}
+      />
     </div>
   );
 }
