@@ -44,7 +44,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm db:check
-      - run: pnpm exec turbo run build lint typecheck
+      - run: pnpm build
+      - run: pnpm exec turbo run lint typecheck
       - name: Run unit tests (JUnit)
         run: |
           mkdir -p test-results/junit
