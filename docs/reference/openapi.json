@@ -1,0 +1,911 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/documents": {
+      "post": {
+        "operationId": "DocumentsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "type"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document created and queued"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "413": {
+            "description": "File exceeds 10 MB"
+          },
+          "415": {
+            "description": "Not a valid PDF"
+          },
+          "422": {
+            "description": "Unknown document type or missing template"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Upload a PDF and create a new document (queued for extraction)",
+        "tags": ["documents"]
+      },
+      "get": {
+        "operationId": "DocumentsController_list",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "externalId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["queued", "extracting", "extracted", "failed"],
+              "type": "string"
+            }
+          },
+          {
+            "name": "needsReview",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated document summaries"
+          },
+          "400": {
+            "description": "Invalid query or cursor"
+          }
+        },
+        "summary": "List alive documents with forward keyset pagination and filters",
+        "tags": ["documents"]
+      }
+    },
+    "/documents/facets": {
+      "get": {
+        "operationId": "DocumentsController_facets",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Needs-review facet count"
+          }
+        },
+        "summary": "Get capped (<=100) count of documents needing review",
+        "tags": ["documents"]
+      }
+    },
+    "/documents/{id}": {
+      "get": {
+        "operationId": "DocumentsController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document detail snapshot"
+          },
+          "400": {
+            "description": "Invalid document UUID"
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        },
+        "summary": "Get document detail including values, valuesTextMeta, and recent versions",
+        "tags": ["documents"]
+      }
+    },
+    "/documents/{id}/progress": {
+      "get": {
+        "operationId": "DocumentsController_progress",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress summary"
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        },
+        "summary": "Get disjoint review progress counts for the reviewable version",
+        "tags": ["documents"]
+      }
+    },
+    "/documents/{id}/versions": {
+      "post": {
+        "operationId": "VersionsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deduplicated against latest non-failed upload"
+          },
+          "201": {
+            "description": "New version created and queued"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "404": {
+            "description": "Document not found"
+          },
+          "413": {
+            "description": "File exceeds 10 MB"
+          },
+          "415": {
+            "description": "Not a valid PDF"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Upload a new PDF version for an existing document (with dedupe)",
+        "tags": ["versions"]
+      },
+      "get": {
+        "operationId": "VersionsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "origin",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["upload", "reextract"],
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["queued", "extracting", "extracted", "failed"],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated version summaries"
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        },
+        "summary": "List versions of a document (newest first)",
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}": {
+      "get": {
+        "operationId": "VersionsController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version detail"
+          },
+          "404": {
+            "description": "Document or version not found"
+          }
+        },
+        "summary": "Get detail, values, progress, and file metadata for a version",
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/values": {
+      "get": {
+        "operationId": "VersionsController_values",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "attention",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["changed", "gap", "pending", "done"],
+              "type": "string"
+            }
+          },
+          {
+            "name": "reviewState",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["pending", "approved", "corrected", "carried_over"],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated extracted values"
+          },
+          "404": {
+            "description": "Document or version not found"
+          }
+        },
+        "summary": "List extracted values for a version ordered by template position",
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/text": {
+      "get": {
+        "operationId": "VersionsController_text",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Parsed UTF-8 plain text"
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "404": {
+            "description": "Document or version not found"
+          },
+          "409": {
+            "description": "Parsed text not yet available"
+          }
+        },
+        "summary": "Download parsed plain text for a version (ETag + 304)",
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/file": {
+      "get": {
+        "operationId": "VersionsController_file",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original PDF binary"
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "404": {
+            "description": "Document or version not found"
+          }
+        },
+        "summary": "Download original PDF bytes for a version (sandboxed attachment)",
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/retry": {
+      "post": {
+        "operationId": "VersionsController_retry",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Version re-queued for extraction"
+          },
+          "404": {
+            "description": "Document or version not found"
+          },
+          "409": {
+            "description": "Version is not in failed status"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Retry a failed version (resets attempts to 0 and re-enqueues)",
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/reextract": {
+      "post": {
+        "operationId": "VersionsController_reextract",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "reparse",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "New reextract version created and queued"
+          },
+          "404": {
+            "description": "Document or version not found"
+          },
+          "409": {
+            "description": "Source version is not terminal"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Create a new version re-extracting a terminal version",
+        "tags": ["versions"]
+      }
+    },
+    "/values/{id}/review": {
+      "post": {
+        "operationId": "ValuesController_review",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["decision"],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": ["approve", "correct"]
+                  },
+                  "correctedValue": {},
+                  "note": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "expectedCurrentReviewId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Identical review no-op"
+          },
+          "201": {
+            "description": "Review recorded"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "404": {
+            "description": "Value not found"
+          },
+          "409": {
+            "description": "Version not reviewable or review conflict"
+          },
+          "422": {
+            "description": "Invalid typed correction"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Approve or correct an extracted value on the reviewable version",
+        "tags": ["values"]
+      }
+    },
+    "/values/{id}/reviews": {
+      "get": {
+        "operationId": "ValuesController_reviews",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "origin",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["human", "carried"],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated review history"
+          },
+          "404": {
+            "description": "Value not found"
+          }
+        },
+        "summary": "List append-only review history for an extracted value",
+        "tags": ["values"]
+      }
+    },
+    "/document-types": {
+      "get": {
+        "operationId": "DocumentTypesController_list",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated document types with latest template"
+          }
+        },
+        "summary": "List supported document types and their latest extraction templates",
+        "tags": ["document-types"]
+      }
+    },
+    "/documents/{id}/versions/{n}/runs": {
+      "get": {
+        "operationId": "RunsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["running", "succeeded", "failed", "abandoned"],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated extraction runs"
+          },
+          "400": {
+            "description": "Invalid parameters or cursor"
+          },
+          "404": {
+            "description": "Document or version not found"
+          }
+        },
+        "summary": "List extraction runs for a document version",
+        "tags": ["runs"]
+      }
+    },
+    "/documents/{id}/versions/{n}/runs/{runId}/calls": {
+      "get": {
+        "operationId": "RunsController_calls",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "kind",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": ["extract", "repair"],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated LLM calls (when DEBUG_ENDPOINTS=true)"
+          },
+          "404": {
+            "description": "Route disabled or run not found"
+          }
+        },
+        "summary": "List LLM calls for an extraction run (DEBUG_ENDPOINTS only)",
+        "tags": ["runs"]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Liveness probe (event-loop lag)",
+        "tags": ["health"]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Readiness probe (503 only if DB is down; Redis/S3 down -> 200 degraded)",
+        "tags": ["health"]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "MetricsController_metricsEndpoint",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Prometheus metrics exposition",
+        "tags": ["health"]
+      }
+    }
+  },
+  "info": {
+    "title": "Document Review API",
+    "description": "Document upload, structured LLM extraction, verbatim evidence review, and version carry-over API.",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "documents",
+      "description": ""
+    },
+    {
+      "name": "versions",
+      "description": ""
+    },
+    {
+      "name": "values",
+      "description": ""
+    },
+    {
+      "name": "document-types",
+      "description": ""
+    },
+    {
+      "name": "runs",
+      "description": ""
+    },
+    {
+      "name": "health",
+      "description": ""
+    }
+  ],
+  "servers": [],
+  "components": {
+    "schemas": {}
+  }
+}

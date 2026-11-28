@@ -20,6 +20,7 @@ import {
 import { Inject, Injectable } from '@nestjs/common';
 import { ProblemError, truncateProblemMessage } from '../common/problem.js';
 import { API_DEPS, type ApiDeps } from '../deps.js';
+import { ApiMetricsService } from '../observability/metrics.service.js';
 import { toReviewListItem } from '../views/presenters.js';
 import { ViewService } from '../views/view.service.js';
 
@@ -34,6 +35,7 @@ export class ValuesService {
   constructor(
     @Inject(API_DEPS) private readonly deps: ApiDeps,
     @Inject(ViewService) private readonly views: ViewService,
+    @Inject(ApiMetricsService) private readonly metrics: ApiMetricsService,
   ) {}
 
   async review(
@@ -95,6 +97,9 @@ export class ValuesService {
           },
         };
       });
+      if (committed.status === 201) {
+        this.metrics.incReview(body.decision, 'human');
+      }
       return committed;
     } catch (err) {
       if (err instanceof DbRepoError && err.code === 'REVIEW_CONFLICT') {

@@ -10,6 +10,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   Inject,
   Param,
   Post,
@@ -20,23 +21,60 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ParseUuidPipe, ParseVersionNumberPipe } from '../common/id.pipes.js';
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { ReqLike, ResLike } from '../common/http.js';
+import { ParseUuidPipe, ParseVersionNumberPipe } from '../common/id.pipes.js';
 import { PaginatedInterceptor } from '../common/paginated.interceptor.js';
 import { PdfFilePipe, type PdfUpload } from '../common/pdf-file.pipe.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { UPLOAD_LIMITS } from '../documents/documents.controller.js';
+import { ThrottleGroup } from '../security/throttler.guard.js';
 import { VersionsService } from './versions.service.js';
 
 function asciiFallback(filename: string): string {
   return filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
 }
 
+/** RFC 9110 §13.1.2 weak ETag comparison (`*` or optional leading `W/`). */
+export function ifNoneMatchMatches(header: string | undefined, strongEtag: string): boolean {
+  if (header === undefined) return false;
+  const target = strongEtag.replace(/^W\//, '');
+  return header.split(',').some((raw) => {
+    const token = raw.trim();
+    return token === '*' || token.replace(/^W\//, '') === target;
+  });
+}
+
+@ApiTags('versions')
 @Controller('documents/:id/versions')
 export class VersionsController {
   constructor(@Inject(VersionsService) private readonly versions: VersionsService) {}
 
   @Post()
+  @ThrottleGroup('upload')
+  @ApiOperation({ summary: 'Upload a new PDF version for an existing document (with dedupe)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'New version created and queued' })
+  @ApiResponse({ status: 200, description: 'Deduplicated against latest non-failed upload' })
+  @ApiResponse({ status: 400, description: 'Invalid request' })
+  @ApiResponse({ status: 404, description: 'Document not found' })
+  @ApiResponse({ status: 413, description: 'File exceeds 10 MB' })
+  @ApiResponse({ status: 415, description: 'Not a valid PDF' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS, defParamCharset: 'utf8' }))
   async create(
     @Param('id', new ParseUuidPipe()) id: string,
@@ -52,6 +90,17 @@ export class VersionsController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'List versions of a document (newest first)' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['queued', 'extracting', 'extracted', 'failed'],
+  })
+  @ApiQuery({ name: 'origin', required: false, enum: ['upload', 'reextract'] })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Paginated version summaries' })
+  @ApiResponse({ status: 404, description: 'Document not found' })
   @UseInterceptors(PaginatedInterceptor)
   list(
     @Param('id', new ParseUuidPipe()) id: string,
@@ -62,6 +111,9 @@ export class VersionsController {
   }
 
   @Get(':n')
+  @ApiOperation({ summary: 'Get detail, values, progress, and file metadata for a version' })
+  @ApiResponse({ status: 200, description: 'Version detail' })
+  @ApiResponse({ status: 404, description: 'Document or version not found' })
   detail(
     @Param('id', new ParseUuidPipe()) id: string,
     @Param('n', new ParseVersionNumberPipe()) n: number,
@@ -70,6 +122,17 @@ export class VersionsController {
   }
 
   @Get(':n/values')
+  @ApiOperation({ summary: 'List extracted values for a version ordered by template position' })
+  @ApiQuery({
+    name: 'reviewState',
+    required: false,
+    enum: ['pending', 'approved', 'corrected', 'carried_over'],
+  })
+  @ApiQuery({ name: 'attention', required: false, enum: ['changed', 'gap', 'pending', 'done'] })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Paginated extracted values' })
+  @ApiResponse({ status: 404, description: 'Document or version not found' })
   @UseInterceptors(PaginatedInterceptor)
   values(
     @Param('id', new ParseUuidPipe()) id: string,
@@ -80,6 +143,11 @@ export class VersionsController {
   }
 
   @Get(':n/text')
+  @ApiOperation({ summary: 'Download parsed plain text for a version (ETag + 304)' })
+  @ApiResponse({ status: 200, description: 'Parsed UTF-8 plain text' })
+  @ApiResponse({ status: 304, description: 'Not modified' })
+  @ApiResponse({ status: 404, description: 'Document or version not found' })
+  @ApiResponse({ status: 409, description: 'Parsed text not yet available' })
   async text(
     @Param('id', new ParseUuidPipe()) id: string,
     @Param('n', new ParseVersionNumberPipe()) n: number,
@@ -90,7 +158,7 @@ export class VersionsController {
     const etag = `"${sha256}"`;
     res.setHeader('ETag', etag);
     res.setHeader('Cache-Control', 'no-cache');
-    if (ifNoneMatch !== undefined && ifNoneMatch.split(',').some((t) => t.trim() === etag)) {
+    if (ifNoneMatchMatches(ifNoneMatch, etag)) {
       res.status(304).end();
       return;
     }
@@ -99,6 +167,10 @@ export class VersionsController {
   }
 
   @Get(':n/file')
+  @ApiOperation({ summary: 'Download original PDF bytes for a version (sandboxed attachment)' })
+  @ApiResponse({ status: 200, description: 'Original PDF binary' })
+  @ApiResponse({ status: 304, description: 'Not modified' })
+  @ApiResponse({ status: 404, description: 'Document or version not found' })
   async file(
     @Param('id', new ParseUuidPipe()) id: string,
     @Param('n', new ParseVersionNumberPipe()) n: number,
@@ -112,7 +184,7 @@ export class VersionsController {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
-    if (ifNoneMatch !== undefined && ifNoneMatch.split(',').some((t) => t.trim() === etag)) {
+    if (ifNoneMatchMatches(ifNoneMatch, etag)) {
       res.status(304).end();
       return;
     }
@@ -125,6 +197,13 @@ export class VersionsController {
   }
 
   @Post(':n/retry')
+  @HttpCode(202)
+  @ThrottleGroup('upload')
+  @ApiOperation({ summary: 'Retry a failed version (resets attempts to 0 and re-enqueues)' })
+  @ApiResponse({ status: 202, description: 'Version re-queued for extraction' })
+  @ApiResponse({ status: 404, description: 'Document or version not found' })
+  @ApiResponse({ status: 409, description: 'Version is not in failed status' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   async retry(
     @Param('id', new ParseUuidPipe()) id: string,
     @Param('n', new ParseVersionNumberPipe()) n: number,
@@ -136,6 +215,13 @@ export class VersionsController {
   }
 
   @Post(':n/reextract')
+  @ThrottleGroup('upload')
+  @ApiOperation({ summary: 'Create a new version re-extracting a terminal version' })
+  @ApiQuery({ name: 'reparse', required: false, type: Boolean })
+  @ApiResponse({ status: 201, description: 'New reextract version created and queued' })
+  @ApiResponse({ status: 404, description: 'Document or version not found' })
+  @ApiResponse({ status: 409, description: 'Source version is not terminal' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
   async reextract(
     @Param('id', new ParseUuidPipe()) id: string,
     @Param('n', new ParseVersionNumberPipe()) n: number,

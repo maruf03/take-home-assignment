@@ -20,6 +20,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ProblemError } from '../common/problem.js';
 import { titleFromFilename, type PdfUpload } from '../common/pdf-file.pipe.js';
 import { API_DEPS, type ApiDeps } from '../deps.js';
+import { ApiMetricsService } from '../observability/metrics.service.js';
 import { ViewService } from '../views/view.service.js';
 
 export function storageKeyFor(sha256: string): string {
@@ -31,6 +32,7 @@ export class DocumentsService {
   constructor(
     @Inject(API_DEPS) private readonly deps: ApiDeps,
     @Inject(ViewService) private readonly views: ViewService,
+    @Inject(ApiMetricsService) private readonly metrics: ApiMetricsService,
   ) {}
 
   async list(query: ListDocumentsQuery): Promise<Page<DocumentSummaryDto>> {
@@ -99,6 +101,7 @@ export class DocumentsService {
       return { versionId: version.id, detail: built };
     });
 
+    this.metrics.incDocumentUploaded(meta.type);
     await this.deps.enqueuer.enqueue(versionId, { trigger: 'upload', correlationId: requestId });
     return detail;
   }
