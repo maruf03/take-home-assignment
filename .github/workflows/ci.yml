@@ -44,22 +44,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm db:check
-      - name: Build, lint & typecheck
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          FILTER_FLAG=""
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            FILTER_FLAG="--filter=...[origin/main]"
-          fi
-          pnpm exec turbo run build lint typecheck $FILTER_FLAG
+      - run: pnpm exec turbo run build lint typecheck
       - name: Run unit tests (JUnit)
         run: |
           mkdir -p test-results/junit
           rc=0
-          for pkg in packages/config packages/contracts packages/core packages/pdf packages/llm packages/storage packages/db packages/testkit apps/worker apps/api apps/web; do
-            name="$(echo "$pkg" | tr '/' '-')"
-            (cd "$pkg" && pnpm exec vitest run --passWithNoTests --reporter=default --reporter=junit --outputFile="$PWD/../../test-results/junit/${name}-unit.xml") || rc=1
+          for filter in @app/config @app/contracts @app/core @app/pdf @app/llm @app/storage @app/db @app/testkit @app/worker @app/api @app/web; do
+            name="${filter#@app/}"
+            pnpm --filter "$filter" test -- --reporter=default --reporter=junit --outputFile="$PWD/test-results/junit/${name}-unit.xml" || rc=1
           done
           exit "$rc"
       - run: pnpm audit --prod --audit-level=high
