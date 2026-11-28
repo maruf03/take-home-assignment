@@ -173,7 +173,7 @@ describe('DocumentDetailPage, TextPane, PDF download, and polling', () => {
     const picker = screen.getByLabelText(/version picker/i);
     await user.selectOptions(picker, '2');
     expect(await screen.findByRole('heading', { name: /extraction failed/i })).toBeInTheDocument();
-    expect(screen.getByText(/no text layer/i)).toBeInTheDocument();
+    expect(screen.getByText(/this pdf has no text layer/i)).toBeInTheDocument();
     expect(textRequestsForV2).toBe(0);
   });
 

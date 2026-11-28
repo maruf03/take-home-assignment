@@ -3,22 +3,25 @@ import { getUiCopy } from '@app/contracts/ui-copy';
 import { formatTypedValue } from '@app/contracts/values';
 import type { ReactNode } from 'react';
 import { formatCopy, VISIBLE_REVIEWER_FLAGS } from '../../shared/lib/format.js';
+import { diffTokens } from '../../shared/lib/token-diff.js';
 import { Badge, type BadgeTone } from '../../shared/ui/Primitives.js';
 
-function stateBadgeFor(value: ValueViewDto): { label: string; tone: BadgeTone } {
-  if (value.reviewState === 'approved') return { label: 'Approved', tone: 'done' };
-  if (value.reviewState === 'corrected') return { label: 'Corrected', tone: 'corrected' };
+function stateBadgeFor(value: ValueViewDto): { icon: string; label: string; tone: BadgeTone } {
+  if (value.reviewState === 'approved') return { icon: '✓', label: 'Approved', tone: 'done' };
+  if (value.reviewState === 'corrected')
+    return { icon: '✎', label: 'Corrected', tone: 'corrected' };
   if (value.reviewState === 'carried_over') {
     const fromV = value.review?.carriedFromVersion;
     const dec = value.review?.decision === 'correct' ? 'corrected' : 'approved';
     return {
+      icon: '↪',
       label: fromV ? `Carried from v${fromV}, ${dec}` : `Carried, ${dec}`,
       tone: 'done',
     };
   }
-  if (value.attention === 'changed') return { label: 'Changed', tone: 'attention' };
-  if (value.kind === 'gap') return { label: 'Gap', tone: 'gap' };
-  return { label: 'Pending', tone: 'neutral' };
+  if (value.attention === 'changed') return { icon: '△', label: 'Changed', tone: 'attention' };
+  if (value.kind === 'gap') return { icon: '✕', label: 'Gap', tone: 'gap' };
+  return { icon: '○', label: 'Pending', tone: 'neutral' };
 }
 
 export interface ValueRowProps {
@@ -26,14 +29,16 @@ export interface ValueRowProps {
   readonly selected: boolean;
   readonly onSelect: (value: ValueViewDto) => void;
   readonly actions?: ReactNode;
+  readonly editor?: ReactNode;
+  readonly conflict?: ReactNode;
 }
 
 /**
  * Displays a single extracted value or gap with its effective value, state badge, verbatim
- * evidence quote from stored offsets, visible flags (never LINE_HINT_MISMATCH), and optional
- * review actions slot (populated in Task 11b).
+ * evidence quote from stored offsets, changed-value comparison with token diff, visible flags
+ * (never LINE_HINT_MISMATCH), review actions, inline correction editor, and conflict card slots.
  */
-export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) {
+export function ValueRow({ value, selected, onSelect, actions, editor, conflict }: ValueRowProps) {
   const badge = stateBadgeFor(value);
   const effectiveText =
     value.effectiveValue !== null ? formatTypedValue(value.fieldType, value.effectiveValue) : '—';
@@ -57,6 +62,12 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
       : null;
 
   const evidenceDescId = value.evidence ? `evidence-desc-${value.id}` : undefined;
+  const previous = value.previous;
+  const showChangedComparison = value.changeKind === 'changed' && previous !== null;
+  const tokenDiff =
+    showChangedComparison && previous.evidence && value.evidence
+      ? diffTokens(previous.evidence.quote, value.evidence.quote)
+      : null;
 
   return (
     <div
@@ -65,7 +76,7 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
       data-value-id={value.id}
       onClick={(e) => {
         const target = e.target as HTMLElement | null;
-        if (target?.closest('button, a, input, select, textarea')) return;
+        if (target?.closest('button, a, input, select, textarea, form')) return;
         onSelect(value);
       }}
       className={`cursor-pointer border-b border-[var(--color-border)] px-4 py-3.5 transition-colors ${
@@ -86,7 +97,10 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
             >
               {value.label}
             </button>
-            <Badge tone={badge.tone}>{badge.label}</Badge>
+            <Badge tone={badge.tone}>
+              <span aria-hidden="true">{badge.icon}</span>
+              <span>{badge.label}</span>
+            </Badge>
           </div>
           <div className="mt-1 flex flex-wrap items-baseline gap-2">
             <span className="tabular-nums text-base font-semibold text-[var(--color-ink)]">
@@ -97,10 +111,10 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
                 {extractedText}
               </span>
             ) : null}
-            {value.attention === 'changed' && value.previous?.effectiveValue != null ? (
+            {showChangedComparison && previous.effectiveValue != null ? (
               <span className="tabular-nums text-xs text-[var(--color-ink-muted)] line-through">
-                v{value.previous.versionNumber}:{' '}
-                {formatTypedValue(value.fieldType, value.previous.effectiveValue)}
+                v{previous.versionNumber}:{' '}
+                {formatTypedValue(value.fieldType, previous.effectiveValue)}
               </span>
             ) : null}
           </div>
@@ -116,7 +130,94 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
         <p className="mt-1.5 text-xs font-medium text-[var(--color-attention)]">{changeCopy}</p>
       ) : null}
 
-      {value.evidence ? (
+      {/* Two-column Changed comparison with token-level diff (spec §14.2, [R8]) */}
+      {showChangedComparison ? (
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)]/70 px-2.5 py-2 text-xs text-[var(--color-ink-muted)]">
+            <div className="flex flex-wrap items-center justify-between gap-1 font-medium">
+              <span>Previous (v{previous.versionNumber})</span>
+              <span className="tabular-nums">
+                {previous.effectiveValue !== null
+                  ? formatTypedValue(value.fieldType, previous.effectiveValue)
+                  : '—'}
+              </span>
+            </div>
+            {previous.evidence ? (
+              <>
+                <p className="mt-1 font-mono text-xs text-[var(--color-ink-muted)]">
+                  {tokenDiff
+                    ? tokenDiff
+                        .filter((t) => t.kind !== 'added')
+                        .map((tok, i) =>
+                          tok.kind === 'removed' ? (
+                            <del
+                              key={i}
+                              className="rounded bg-red-100 px-0.5 text-[var(--color-gap)] line-through"
+                            >
+                              {tok.text}
+                            </del>
+                          ) : (
+                            <span key={i}>{tok.text}</span>
+                          ),
+                        )
+                    : previous.evidence.quote}
+                </p>
+                <p className="mt-0.5 text-[11px]">Line {previous.evidence.line}</p>
+              </>
+            ) : previous.gap ? (
+              <p className="mt-1 text-xs">{previous.gap.reason}</p>
+            ) : null}
+            {previous.review ? (
+              <p className="mt-1 text-[11px]">
+                Previous review:{' '}
+                <span className="font-medium">
+                  {previous.review.decision === 'correct' ? 'Corrected' : 'Approved'}
+                </span>
+                {previous.review.note ? ` — "${previous.review.note}"` : ''}
+              </p>
+            ) : null}
+          </div>
+
+          <div
+            id={evidenceDescId}
+            className="rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2.5 py-2 text-xs"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-1 font-medium text-[var(--color-ink)]">
+              <span>Current</span>
+              <span className="tabular-nums">{effectiveText}</span>
+            </div>
+            {value.evidence ? (
+              <>
+                <p className="mt-1 font-mono text-xs text-[var(--color-ink)]">
+                  {tokenDiff
+                    ? tokenDiff
+                        .filter((t) => t.kind !== 'removed')
+                        .map((tok, i) =>
+                          tok.kind === 'added' ? (
+                            <ins
+                              key={i}
+                              className="rounded bg-green-100 px-0.5 font-medium text-[var(--color-done)] underline decoration-2"
+                            >
+                              {tok.text}
+                            </ins>
+                          ) : (
+                            <span key={i}>{tok.text}</span>
+                          ),
+                        )
+                    : value.evidence.quote}
+                </p>
+                <p className="mt-0.5 text-[11px] text-[var(--color-ink-muted)]">
+                  Line {value.evidence.line}
+                  {value.evidence.matchMode === 'quote_folded' ? ' (quote folded)' : ''}
+                  {value.evidence.matchCount > 1
+                    ? ` · ${value.evidence.matchCount} occurrences`
+                    : ''}
+                </p>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : value.evidence ? (
         <div
           id={evidenceDescId}
           className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2.5 py-1.5"
@@ -157,6 +258,9 @@ export function ValueRow({ value, selected, onSelect, actions }: ValueRowProps) 
           ))}
         </ul>
       ) : null}
+
+      {conflict}
+      {editor}
     </div>
   );
 }

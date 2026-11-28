@@ -17,6 +17,7 @@ import {
   DEFAULT_POLL_MS,
   isDocumentInFlight,
   isFirstPageInFlight,
+  isStatusInFlight,
 } from '../../shared/api/polling.js';
 import { queryKeys, type DocumentsListFilters } from '../../shared/api/query-keys.js';
 
@@ -88,7 +89,11 @@ export function useDocumentDetail(documentId: string, pollMs = DEFAULT_POLL_MS) 
   });
 }
 
-export function useVersionDetail(documentId: string, versionNumber: number | null) {
+export function useVersionDetail(
+  documentId: string,
+  versionNumber: number | null,
+  pollMs = DEFAULT_POLL_MS,
+) {
   return useQuery<VersionDetailDto>({
     queryKey: queryKeys.documents.version(documentId, versionNumber ?? 0),
     enabled: versionNumber !== null,
@@ -99,6 +104,8 @@ export function useVersionDetail(documentId: string, versionNumber: number | nul
         signal,
       ),
     staleTime: 60_000,
+    refetchInterval: (query) =>
+      query.state.data && isStatusInFlight(query.state.data.status) ? pollMs : false,
     throwOnError: true,
   });
 }

@@ -5,6 +5,7 @@ import {
   useDocumentsList,
   useDocumentTypes,
 } from '../entities/document/queries.js';
+import { RetryButton } from '../features/retry/RetryButton.js';
 import { DEFAULT_POLL_MS, isStatusInFlight } from '../shared/api/polling.js';
 import type { DocumentsListView } from '../shared/api/query-keys.js';
 import { formatFacetCount, formatTimestamp } from '../shared/lib/format.js';
@@ -231,6 +232,10 @@ export function DocumentsListPage({
                       </Badge>
                     ) : doc.progress.total > 0 ? (
                       <Badge tone="done">Reviewed</Badge>
+                    ) : null}
+                    {doc.currentVersion.status === 'failed' &&
+                    doc.currentVersion.error?.retryable !== false ? (
+                      <RetryButton documentId={doc.id} versionNumber={doc.currentVersion.number} />
                     ) : null}
                   </div>
                 </li>
