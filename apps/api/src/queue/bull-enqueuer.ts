@@ -5,7 +5,8 @@ import type { EnqueueOptions, ExtractionEnqueuer } from '../deps.js';
 
 /** Must match the worker's queue name (apps/worker/src/extraction.processor.ts). */
 export const EXTRACTION_QUEUE_NAME = 'extraction';
-const ENQUEUE_TIMEOUT_MS = 2000;
+/** Spec §2: 500ms timeout so upload never stalls when Redis is degraded. */
+const ENQUEUE_TIMEOUT_MS = 500;
 const UPLOAD_PRIORITY = 1;
 const LIVE_JOB_STATES = new Set([
   'waiting',
@@ -19,6 +20,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('enqueue timeout')), ms);
+    timer.unref?.();
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

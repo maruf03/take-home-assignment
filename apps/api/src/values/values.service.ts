@@ -18,7 +18,7 @@ import {
   withTx,
 } from '@app/db';
 import { Inject, Injectable } from '@nestjs/common';
-import { ProblemError } from '../common/problem.js';
+import { ProblemError, truncateProblemMessage } from '../common/problem.js';
 import { API_DEPS, type ApiDeps } from '../deps.js';
 import { toReviewListItem } from '../views/presenters.js';
 import { ViewService } from '../views/view.service.js';
@@ -50,17 +50,26 @@ export class ValuesService {
         dateOrder: ctx.template.dateOrder as DateOrder,
       });
       if (!parsed.ok) {
-        throw new ProblemError('INVALID_CORRECTION', parsed.error, {
-          errors: [{ path: 'correctedValue', message: parsed.error }],
+        // Spec §7.3: never echo values longer than 100 characters in error payloads.
+        const rawExceedsLimit =
+          (typeof body.correctedValue === 'string' && body.correctedValue.length > 100) ||
+          (typeof body.correctedValue === 'object' &&
+            body.correctedValue !== null &&
+            body.correctedValue.amount.length > 100);
+        const safeError = rawExceedsLimit
+          ? `Invalid ${ctx.value.fieldType} value`
+          : truncateProblemMessage(parsed.error);
+        throw new ProblemError('INVALID_CORRECTION', safeError, {
+          errors: [{ path: 'correctedValue', message: safeError }],
         });
       }
       correctedValue = parsed.value;
     }
 
-    let result: Awaited<ReturnType<typeof insertReview>>;
     try {
-      result = await withTx(this.deps.db, (tx) =>
-        insertReview(
+      // Build ValueViewDto in the SAME transaction as insertReview so { value, progress } are atomic.
+      const committed = await withTx(this.deps.db, async (tx) => {
+        const result = await insertReview(
           tx,
           valueId,
           {
@@ -72,8 +81,21 @@ export class ValuesService {
               : {}),
           },
           requestId,
-        ),
-      );
+        );
+        const viewCtx = await getValueContext(tx, valueId);
+        const [value] = await this.views.valueViews(tx, viewCtx.version, viewCtx.document, [
+          valueId,
+        ]);
+        return {
+          status: (result.noop ? 200 : 201) as 200 | 201,
+          body: {
+            value: value!,
+            progress: result.progress,
+            ...(result.noop ? { noop: true } : {}),
+          },
+        };
+      });
+      return committed;
     } catch (err) {
       if (err instanceof DbRepoError && err.code === 'REVIEW_CONFLICT') {
         const currentValue = await this.currentValueView(valueId);
@@ -81,12 +103,6 @@ export class ValuesService {
       }
       throw err;
     }
-
-    const value = await this.currentValueView(valueId);
-    return {
-      status: result.noop ? 200 : 201,
-      body: { value, progress: result.progress, ...(result.noop ? { noop: true } : {}) },
-    };
   }
 
   reviews(valueId: string, query: ListReviewsQuery): Promise<Page<ReviewDto>> {

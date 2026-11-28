@@ -676,4 +676,81 @@ describe('API Core Task 9 integration: upload, documents, versions, values, revi
     expect(byExt.data).toHaveLength(1);
     expect(byExt.data[0]!.externalId).toBe('doc-invoice-001');
   });
+
+  it('handles multi-byte UTF-8 and emoji filenames, preserves X-Request-Id/nosniff on JSON body errors, and never echoes >100-char invalid values', async () => {
+    // 1. Multi-byte UTF-8 (>255 bytes) and emoji filenames upload cleanly within DB/DTO limits
+    const utf8Res = await postMultipart(`${h.baseUrl}/documents`, {
+      file: { buffer: makeMinimalPdf('utf8-name'), filename: `${'é'.repeat(200)}.pdf` },
+      fields: { type: 'invoice' },
+    });
+    expect(utf8Res.status).toBe(201);
+    const utf8Doc = documentDetailDtoSchema.parse(await utf8Res.json());
+    expect(utf8Doc.title.length).toBeLessThanOrEqual(200);
+
+    const emojiRes = await postMultipart(`${h.baseUrl}/documents`, {
+      file: { buffer: makeMinimalPdf('emoji-name'), filename: `${'👨‍👩‍👧‍👦'.repeat(100)}.pdf` },
+      fields: { type: 'invoice' },
+    });
+    expect(emojiRes.status).toBe(201);
+    const emojiDoc = documentDetailDtoSchema.parse(await emojiRes.json());
+    expect(emojiDoc.title.length).toBeLessThanOrEqual(200);
+
+    // 2. Malformed JSON (400) and >64KB JSON (413) preserve X-Request-Id and nosniff
+    const badJsonRes = await fetch(
+      `${h.baseUrl}/values/01950000-0000-7000-8000-000000000001/review`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-request-id': 'req-bad-json' },
+        body: '{invalid json',
+      },
+    );
+    expect(badJsonRes.status).toBe(400);
+    expect(badJsonRes.headers.get('x-request-id')).toBe('req-bad-json');
+    expect(badJsonRes.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(problemDetailsSchema.parse(await badJsonRes.json()).requestId).toBe('req-bad-json');
+
+    const hugeJsonRes = await fetch(
+      `${h.baseUrl}/values/01950000-0000-7000-8000-000000000001/review`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-request-id': 'req-huge-json' },
+        body: JSON.stringify({ decision: 'approve', note: 'x'.repeat(70_000) }),
+      },
+    );
+    expect(hugeJsonRes.status).toBe(413);
+    expect(hugeJsonRes.headers.get('x-request-id')).toBe('req-huge-json');
+    expect(hugeJsonRes.headers.get('x-content-type-options')).toBe('nosniff');
+    const hugeProb = problemDetailsSchema.parse(await hugeJsonRes.json());
+    expect(hugeProb.code).toBe('FILE_TOO_LARGE');
+    expect(hugeProb.requestId).toBe('req-huge-json');
+
+    // 3. >100-char invalid correctedValue on money field never echoes >100 chars in errors[]
+    const v1Id = h.enqueuer.calls[0]!.versionId;
+    await extractInvoiceVersion(v1Id, {
+      vendor: 'Acme',
+      total: '100',
+      parsedText: 'Vendor: Acme\nTotal: $100\n',
+    });
+    const detail = documentDetailDtoSchema.parse(
+      await (await fetch(`${h.baseUrl}/documents/${utf8Doc.id}`)).json(),
+    );
+    const totalVal = detail.values.find((v) => v.fieldKey === 'total_amount')!;
+    const longInvalid = 'BADVALUE_'.repeat(30);
+    expect(longInvalid.length).toBeGreaterThan(100);
+
+    const longCorrRes = await fetch(`${h.baseUrl}/values/${totalVal.id}/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'correct', correctedValue: longInvalid }),
+    });
+    expect(longCorrRes.status).toBe(422);
+    const longCorrProb = problemDetailsSchema.parse(await longCorrRes.json());
+    expect(longCorrProb.code).toBe('INVALID_CORRECTION');
+    expect(longCorrProb.errors).toBeDefined();
+    for (const err of longCorrProb.errors!) {
+      expect(err.message.length).toBeLessThanOrEqual(100);
+      expect(err.message).not.toContain(longInvalid);
+    }
+    expect(longCorrProb.detail).not.toContain(longInvalid);
+  });
 });

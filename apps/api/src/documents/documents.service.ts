@@ -85,8 +85,8 @@ export class DocumentsService {
     const storageKey = storageKeyFor(upload.sha256);
     await this.deps.blobStore.putObject(storageKey, upload.buffer, 'application/pdf');
 
-    const { version } = await withTx(this.deps.db, (tx) =>
-      createDocumentWithInitialVersion(tx, {
+    const { versionId, detail } = await withTx(this.deps.db, async (tx) => {
+      const { version } = await createDocumentWithInitialVersion(tx, {
         type: meta.type,
         title: meta.title ?? titleFromFilename(upload.originalFilename),
         storageKey,
@@ -94,10 +94,12 @@ export class DocumentsService {
         fileSizeBytes: upload.sizeBytes,
         originalFilename: upload.originalFilename,
         requestId,
-      }),
-    );
+      });
+      const built = await this.views.documentDetail(tx, version.documentId);
+      return { versionId: version.id, detail: built };
+    });
 
-    await this.deps.enqueuer.enqueue(version.id, { trigger: 'upload', correlationId: requestId });
-    return this.views.documentDetailSnapshot(version.documentId);
+    await this.deps.enqueuer.enqueue(versionId, { trigger: 'upload', correlationId: requestId });
+    return detail;
   }
 }

@@ -37,7 +37,7 @@ export class VersionsController {
   constructor(@Inject(VersionsService) private readonly versions: VersionsService) {}
 
   @Post()
-  @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS }))
+  @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS, defParamCharset: 'utf8' }))
   async create(
     @Param('id', new ParseUuidPipe()) id: string,
     @UploadedFile(new PdfFilePipe()) upload: PdfUpload,

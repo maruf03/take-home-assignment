@@ -1,7 +1,7 @@
 import type { Page } from '@app/contracts/page';
 import type { VersionStatus } from '@app/contracts/status';
 import { DOCUMENT_TYPE_KEY_REGEX_SOURCE } from '@app/contracts/values';
-import { and, asc, desc, eq, gt, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { DbRepoError, type AppTransaction, type DbTx } from '../client.js';
 import { documents, documentVersions } from '../schema/documents.js';
 import { documentTypes, extractionTemplates, templateFields } from '../schema/templates.js';
@@ -263,15 +263,44 @@ export async function listDocumentTypesWithTemplates(
     .limit(ks.limitPlusOne);
 
   const page = toPage(types, ks.limit, (row) => row.key, '');
+  if (page.data.length === 0) {
+    return { data: [], page: page.page };
+  }
+
+  // Batch latest templates and their fields across all page types (no N+1).
+  const typeKeys = page.data.map((dt) => dt.key);
+  const allTemplates = await tx
+    .select()
+    .from(extractionTemplates)
+    .where(inArray(extractionTemplates.documentType, typeKeys))
+    .orderBy(desc(extractionTemplates.version));
+  const latestByType = new Map<string, ExtractionTemplateRow>();
+  for (const tpl of allTemplates) {
+    if (!latestByType.has(tpl.documentType)) {
+      latestByType.set(tpl.documentType, tpl);
+    }
+  }
+
+  const latestIds = [...latestByType.values()].map((t) => t.id);
+  const allFields =
+    latestIds.length === 0
+      ? []
+      : await tx
+          .select()
+          .from(templateFields)
+          .where(inArray(templateFields.templateId, latestIds))
+          .orderBy(asc(templateFields.position));
+  const fieldsByTemplateId = new Map<string, TemplateFieldRow[]>();
+  for (const field of allFields) {
+    const list = fieldsByTemplateId.get(field.templateId) ?? [];
+    list.push(field);
+    fieldsByTemplateId.set(field.templateId, list);
+  }
+
   const enriched: DocumentTypeWithTemplate[] = [];
   for (const dt of page.data) {
-    const latest = await getLatestTemplateForType(tx, dt.key);
+    const latest = latestByType.get(dt.key);
     if (!latest) continue;
-    const fields = await tx
-      .select()
-      .from(templateFields)
-      .where(eq(templateFields.templateId, latest.id))
-      .orderBy(asc(templateFields.position));
     enriched.push({
       key: dt.key,
       displayName: dt.displayName,
@@ -281,7 +310,7 @@ export async function listDocumentTypesWithTemplates(
         defaultCurrency: latest.defaultCurrency,
         dateOrder: latest.dateOrder,
         instructions: latest.instructions,
-        fields,
+        fields: fieldsByTemplateId.get(latest.id) ?? [],
       },
     });
   }

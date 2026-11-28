@@ -1,3 +1,4 @@
+import { StorageError } from '@app/storage';
 import { describe, expect, it } from 'vitest';
 import { buildNextLink } from '../../src/common/paginated.interceptor.js';
 import {
@@ -62,9 +63,12 @@ describe('API common unit tests', () => {
     }
   });
 
-  it('sanitizeFilename strips paths/controls and titleFromFilename truncates 255-char names to 200', () => {
+  it('sanitizeFilename strips paths/controls, preserves UTF-8 NFC within 255 bytes, and titleFromFilename stays <= 200 UTF-16 units on grapheme boundaries', () => {
     expect(sanitizeFilename('../../etc/\x00passwd.pdf')).toBe('passwd.pdf');
     expect(sanitizeFilename('')).toBe('document.pdf');
+    expect(sanitizeFilename('résumé.pdf')).toBe('résumé.pdf');
+    // NFD e + combining acute -> NFC é
+    expect(sanitizeFilename('re\u0301sume\u0301.pdf')).toBe('résumé.pdf');
 
     const longName = `${'a'.repeat(251)}.pdf`;
     expect(longName).toHaveLength(255);
@@ -73,6 +77,35 @@ describe('API common unit tests', () => {
     const title = titleFromFilename(sanitized);
     expect(title).toHaveLength(MAX_TITLE_LENGTH);
     expect(title).toBe('a'.repeat(200));
+
+    // 200 multi-byte UTF-8 chars (400 bytes) must fit Postgres octet_length <= 255
+    const utf8Long = sanitizeFilename(`${'é'.repeat(200)}.pdf`);
+    expect(Buffer.byteLength(utf8Long, 'utf8')).toBeLessThanOrEqual(255);
+
+    // 100 ZWJ family emoji must fit UTF-16 <= 200 without splitting a grapheme
+    const emojiTitle = titleFromFilename(`${'👨‍👩‍👧‍👦'.repeat(100)}.pdf`);
+    expect(emojiTitle.length).toBeLessThanOrEqual(200);
+    expect(emojiTitle.length % '👨‍👩‍👧‍👦'.length).toBe(0);
+  });
+
+  it('mapExceptionToProblem distinguishes StorageError NOT_FOUND (500) vs STORAGE_UNAVAILABLE (503) and maps 415 body errors', () => {
+    const missingBlob = mapExceptionToProblem(
+      new StorageError('NOT_FOUND', 'missing object', { transient: false }),
+    );
+    expect(missingBlob.status).toBe(500);
+    expect(missingBlob.code).toBe('INTERNAL');
+    expect(missingBlob.unexpected).toBe(true);
+
+    const outage = mapExceptionToProblem(
+      new StorageError('STORAGE_UNAVAILABLE', 'timeout', { transient: true }),
+    );
+    expect(outage.status).toBe(503);
+    expect(outage.code).toBe('STORAGE_UNAVAILABLE');
+    expect(outage.unexpected).toBe(false);
+
+    const badCharset = mapExceptionToProblem({ status: 415, type: 'encoding.unsupported' });
+    expect(badCharset.status).toBe(415);
+    expect(badCharset.code).toBe('UNSUPPORTED_MEDIA_TYPE');
   });
 
   it('mapExceptionToProblem never leaks stacks on 500 and emits errors[] only on 400/422', () => {

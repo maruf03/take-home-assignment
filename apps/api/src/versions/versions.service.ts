@@ -55,37 +55,42 @@ export class VersionsService {
     const storageKey = storageKeyFor(upload.sha256);
     await this.deps.blobStore.putObject(storageKey, upload.buffer, 'application/pdf');
 
-    const result = await withTx(this.deps.db, (tx) =>
-      createNewVersion(tx, documentId, {
+    const committed = await withTx(this.deps.db, async (tx) => {
+      const result = await createNewVersion(tx, documentId, {
         storageKey,
         fileSha256: upload.sha256,
         fileSizeBytes: upload.sizeBytes,
         originalFilename: upload.originalFilename,
         requestId,
-      }),
-    );
-    if (!result.deduplicated) {
-      await this.deps.enqueuer.enqueue(result.version.id, {
+      });
+      const ctx = await loadDocumentContext(tx, documentId);
+      const versionRow = (await getVersionsWithTemplateVersion(tx, [result.version.id])).get(
+        result.version.id,
+      )!;
+      const body: CreateVersionResponseDto = {
+        document: toDocumentSummary(ctx, ctx.progress),
+        version: toVersionSummary(versionRow, ctx.document),
+        ...(result.deduplicated ? { deduplicated: true } : {}),
+      };
+      return {
+        versionId: result.version.id,
+        deduplicated: result.deduplicated,
+        status: (result.deduplicated ? 200 : 201) as 200 | 201,
+        body,
+        versionNumber: result.version.versionNumber,
+      };
+    });
+    if (!committed.deduplicated) {
+      await this.deps.enqueuer.enqueue(committed.versionId, {
         trigger: 'upload',
         correlationId: requestId,
       });
     }
 
-    const body = await withReadOnlyTx(this.deps.db, async (tx) => {
-      const ctx = await loadDocumentContext(tx, documentId);
-      const versionRow = (await getVersionsWithTemplateVersion(tx, [result.version.id])).get(
-        result.version.id,
-      )!;
-      return {
-        document: toDocumentSummary(ctx, ctx.progress),
-        version: toVersionSummary(versionRow, ctx.document),
-        ...(result.deduplicated ? { deduplicated: true } : {}),
-      } satisfies CreateVersionResponseDto;
-    });
     return {
-      status: result.deduplicated ? 200 : 201,
-      body,
-      versionNumber: result.version.versionNumber,
+      status: committed.status,
+      body: committed.body,
+      versionNumber: committed.versionNumber,
     };
   }
 
@@ -196,9 +201,14 @@ export class VersionsService {
     versionNumber: number,
     requestId: string,
   ): Promise<VersionSummaryDto> {
-    const version = await withTx(this.deps.db, (tx) => retryVersion(tx, documentId, versionNumber));
-    await this.deps.enqueuer.enqueue(version.id, { trigger: 'retry', correlationId: requestId });
-    return this.summaryOf(documentId, version.id);
+    const { versionId, summary } = await withTx(this.deps.db, async (tx) => {
+      const version = await retryVersion(tx, documentId, versionNumber);
+      const document = await getAliveDocumentOrThrow(tx, documentId);
+      const row = (await getVersionsWithTemplateVersion(tx, [version.id])).get(version.id)!;
+      return { versionId: version.id, summary: toVersionSummary(row, document) };
+    });
+    await this.deps.enqueuer.enqueue(versionId, { trigger: 'retry', correlationId: requestId });
+    return summary;
   }
 
   async reextract(
@@ -207,21 +217,18 @@ export class VersionsService {
     reparse: boolean,
     requestId: string,
   ): Promise<VersionSummaryDto> {
-    const { version } = await withTx(this.deps.db, (tx) =>
-      createReextractVersion(tx, documentId, versionNumber, { reparse, requestId }),
-    );
-    await this.deps.enqueuer.enqueue(version.id, {
+    const { versionId, summary } = await withTx(this.deps.db, async (tx) => {
+      const { document, version } = await createReextractVersion(tx, documentId, versionNumber, {
+        reparse,
+        requestId,
+      });
+      const row = (await getVersionsWithTemplateVersion(tx, [version.id])).get(version.id)!;
+      return { versionId: version.id, summary: toVersionSummary(row, document) };
+    });
+    await this.deps.enqueuer.enqueue(versionId, {
       trigger: 'reextract',
       correlationId: requestId,
     });
-    return this.summaryOf(documentId, version.id);
-  }
-
-  private summaryOf(documentId: string, versionId: string): Promise<VersionSummaryDto> {
-    return withReadOnlyTx(this.deps.db, async (tx) => {
-      const document = await getAliveDocumentOrThrow(tx, documentId);
-      const row = (await getVersionsWithTemplateVersion(tx, [versionId])).get(versionId)!;
-      return toVersionSummary(row, document);
-    });
+    return summary;
   }
 }

@@ -10,7 +10,7 @@ import {
   type DocumentVersionRow,
   type ExtractionTemplateRow,
 } from './documents.js';
-import { computeVersionProgress, type ReviewRow } from './reviews.js';
+import { computeVersionsProgress, type ReviewRow } from './reviews.js';
 import type { ExtractedValueRow } from './values.js';
 
 export async function getDocumentTypeByKey(
@@ -173,6 +173,17 @@ export async function loadDocumentContexts(
     byId.set(row.version.id, row);
   }
 
+  const reviewablesToCount: Array<{ id: string; versionNumber: number }> = [];
+  for (const document of docs) {
+    if (document.reviewableVersionId !== null) {
+      const rev = byId.get(document.reviewableVersionId);
+      if (rev) {
+        reviewablesToCount.push({ id: rev.version.id, versionNumber: rev.version.versionNumber });
+      }
+    }
+  }
+  const progressByVersionId = await computeVersionsProgress(tx, reviewablesToCount);
+
   const contexts: DocumentContext[] = [];
   for (const document of docs) {
     const latest = byDocAndNumber.get(`${document.id}:${document.latestVersionNumber}`);
@@ -184,7 +195,7 @@ export async function loadDocumentContexts(
         ? (byId.get(document.reviewableVersionId) ?? null)
         : null;
     const progress = reviewable
-      ? await computeVersionProgress(tx, reviewable.version.id, reviewable.version.versionNumber)
+      ? (progressByVersionId.get(reviewable.version.id) ?? EMPTY_PROGRESS)
       : EMPTY_PROGRESS;
     contexts.push({
       document,

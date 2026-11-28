@@ -15,9 +15,10 @@ export async function createApiApp(deps: ApiDeps): Promise<NestExpressApplicatio
     logger: deps.config.APP_ENV === 'test' ? ['error'] : ['log', 'warn', 'error'],
   });
   app.disable('x-powered-by');
-  app.useBodyParser('json', { limit: JSON_BODY_LIMIT });
+  // Register request-id and baseline headers BEFORE body parsers so 400/413/415 parse errors keep them.
   app.use(requestIdMiddleware);
   app.use(baseHeadersMiddleware);
+  app.useBodyParser('json', { limit: JSON_BODY_LIMIT });
   app.useGlobalFilters(new ProblemFilter());
   return app;
 }

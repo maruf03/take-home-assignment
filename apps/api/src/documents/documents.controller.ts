@@ -38,7 +38,7 @@ export class DocumentsController {
   constructor(@Inject(DocumentsService) private readonly documents: DocumentsService) {}
 
   @Post()
-  @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS }))
+  @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS, defParamCharset: 'utf8' }))
   async create(
     @UploadedFile(new PdfFilePipe()) upload: PdfUpload,
     @Body(new ZodValidationPipe(createDocumentMetadataSchema)) meta: CreateDocumentMetadata,

@@ -85,6 +85,14 @@ export function mapExceptionToProblem(exception: unknown): MappedProblem {
     };
   }
   if (exception instanceof StorageError) {
+    if (exception.code === 'NOT_FOUND' || !exception.transient) {
+      return {
+        status: 500,
+        code: 'INTERNAL',
+        detail: 'Internal server error',
+        unexpected: true,
+      };
+    }
     return {
       status: PROBLEM_STATUS.STORAGE_UNAVAILABLE,
       code: 'STORAGE_UNAVAILABLE',
@@ -143,6 +151,19 @@ export function mapExceptionToProblem(exception: unknown): MappedProblem {
   if (
     typeof bodyError === 'object' &&
     bodyError !== null &&
+    bodyError.status === 415 &&
+    typeof bodyError.type === 'string'
+  ) {
+    return {
+      status: 415,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      detail: 'Unsupported content type or encoding',
+      unexpected: false,
+    };
+  }
+  if (
+    typeof bodyError === 'object' &&
+    bodyError !== null &&
     bodyError.status === 400 &&
     typeof bodyError.type === 'string'
   ) {
@@ -179,6 +200,17 @@ export function problemTitle(code: ProblemCode): string {
   if (override) return override;
   const words = code.toLowerCase().split('_').join(' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export const MAX_PROBLEM_ECHO_LENGTH = 100;
+
+/** Enforces spec §7.3: error messages never exceed 100 characters. */
+export function truncateProblemMessage(
+  message: string,
+  maxLength = MAX_PROBLEM_ECHO_LENGTH,
+): string {
+  if (message.length <= maxLength) return message;
+  return `${message.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 export function buildProblemBody(

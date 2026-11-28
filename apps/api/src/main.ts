@@ -19,7 +19,11 @@ async function bootstrap(): Promise<void> {
     forcePathStyle: true,
   });
   // Fail fast per request instead of queueing commands while Redis is down (best-effort enqueue).
-  const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
+  const redis = new Redis(config.REDIS_URL, {
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    connectTimeout: 500,
+  });
   const queue = createExtractionQueue(redis, { maxAttempts: config.MAX_ATTEMPTS });
 
   const app = await createApiApp({
