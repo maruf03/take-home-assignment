@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "provider": "gemini",
+  "requestedModel": "gemini-3.5-flash",
+  "promptVersion": "v1",
+  "key": "e2e-refusal-low-visibility",
+  "documentFingerprint": "5af55e3ec549fd6c010e81897209c3398ea7c253cf40af2c87c87a64b5e7753e",
+  "recordedAt": "2026-11-28T00:00:00.000Z",
+  "providerRequestId": "e2e-refusal-req-001",
+  "rawText": "{\n  \"candidates\": [\n    {\n      \"finishReason\": \"SAFETY\"\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\": 120,\n    \"candidatesTokenCount\": 0,\n    \"totalTokenCount\": 120\n  },\n  \"modelVersion\": \"gemini-3.6-flash\",\n  \"responseId\": \"e2e-refusal-req-001\"\n}\n"
+}

@@ -8,11 +8,20 @@ import { DEFAULT_POLL_MS } from '../shared/api/polling.js';
 import { ErrorBoundary } from '../shared/ui/ErrorBoundary.js';
 import { AppShell } from './AppShell.js';
 
-export function AppRoutes({ pollMs = DEFAULT_POLL_MS }: { readonly pollMs?: number }) {
+function resolvePollMsFromSearch(search: string, fallback: number): number {
+  const raw = new URLSearchParams(search).get('pollMs');
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 100 || parsed > 60_000) return fallback;
+  return Math.floor(parsed);
+}
+
+export function AppRoutes({ pollMs }: { readonly pollMs?: number }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const routeResetKey = `${location.pathname}${location.search}`;
+  const effectivePollMs = pollMs ?? resolvePollMsFromSearch(location.search, DEFAULT_POLL_MS);
 
   return (
     <AppShell onOpenUpload={() => setUploadOpen(true)}>
@@ -24,13 +33,19 @@ export function AppRoutes({ pollMs = DEFAULT_POLL_MS }: { readonly pollMs?: numb
               <Route
                 path="/documents"
                 element={
-                  <DocumentsListPage onOpenUpload={() => setUploadOpen(true)} pollMs={pollMs} />
+                  <DocumentsListPage
+                    onOpenUpload={() => setUploadOpen(true)}
+                    pollMs={effectivePollMs}
+                  />
                 }
               />
-              <Route path="/documents/:id" element={<DocumentDetailPage pollMs={pollMs} />} />
+              <Route
+                path="/documents/:id"
+                element={<DocumentDetailPage pollMs={effectivePollMs} />}
+              />
               <Route
                 path="/documents/:id/versions/:n"
-                element={<DocumentDetailPage pollMs={pollMs} />}
+                element={<DocumentDetailPage pollMs={effectivePollMs} />}
               />
               <Route path="*" element={<Navigate to="/documents?view=needs-review" replace />} />
             </Routes>

@@ -627,4 +627,111 @@ describe('versions dedupe, finalize, reviews delta/conflict, and keyset paginati
       ),
     ).rejects.toMatchObject({ code: 'DOCUMENT_DELETED' });
   });
+
+  it('preserves canonical numeric and boolean-like strings in jsonb without double-parsing', async () => {
+    await ctx.migratorPool.query(
+      `INSERT INTO document_types (key, display_name) VALUES ('market_report', 'Market report')`,
+    );
+    const tplRes = await ctx.migratorPool.query<{ id: string }>(
+      `INSERT INTO extraction_templates (document_type, version, content_sha256)
+       VALUES ('market_report', 1, $1) RETURNING id`,
+      [HEX64_2],
+    );
+    await ctx.migratorPool.query(
+      `INSERT INTO template_fields (template_id, field_key, field_type, position, label)
+       VALUES ($1, 'vacancy_rate', 'percent', 1, 'Vacancy Rate'),
+              ($1, 'flag_text', 'string', 2, 'Flag Text')`,
+      [tplRes.rows[0]!.id],
+    );
+
+    const created = await withTx(ctx.appDb, (tx) =>
+      createDocumentWithInitialVersion(tx, {
+        type: 'market_report',
+        title: 'Numeric String Roundtrip',
+        storageKey: `pdfs/sha256/${HEX64_2}.pdf`,
+        fileSha256: HEX64_2,
+        fileSizeBytes: 256,
+        originalFilename: 'mr.pdf',
+      }),
+    );
+    const claimed = await withTx(ctx.appDb, (tx) => claimVersion(tx, created.version.id, 'w1'));
+    await withTx(ctx.appDb, (tx) =>
+      saveParsedText(tx, created.version.id, claimed!.runId, {
+        parsedText: 'Vacancy: 4.2%\nStatus: true',
+        parsedTextSha256: HEX64_2,
+        parser: 'lines/1',
+        pageOffsets: [0],
+        textRanges: { hidden: [], lowVisibility: [] },
+        warnings: [],
+      }),
+    );
+    await withTx(ctx.appDb, (tx) =>
+      finalizeRun(tx, created.version.id, claimed!.runId, {
+        warnings: [],
+        chunked: false,
+        llmCallCount: 1,
+        reusedCallCount: 0,
+        costUsd: '0',
+        values: [
+          {
+            fieldKey: 'vacancy_rate',
+            fieldType: 'percent',
+            kind: 'value',
+            value: '4.2',
+            rawValue: '4.2%',
+            evidence: 'Vacancy: 4.2%',
+            canonicalEvidence: 'vacancy: 4.2%',
+            evidenceStart: 0,
+            evidenceEnd: 13,
+            evidenceMatchCount: 1,
+            citedLine: 1,
+            matchMode: 'strict',
+            flags: [],
+            changeKind: 'new',
+          },
+          {
+            fieldKey: 'flag_text',
+            fieldType: 'string',
+            kind: 'value',
+            value: 'true',
+            rawValue: 'true',
+            evidence: 'Status: true',
+            canonicalEvidence: 'status: true',
+            evidenceStart: 14,
+            evidenceEnd: 26,
+            evidenceMatchCount: 1,
+            citedLine: 2,
+            matchMode: 'strict',
+            flags: [],
+            changeKind: 'new',
+          },
+        ],
+      }),
+    );
+
+    const rows = await withReadOnlyTx(ctx.appDb, (tx) =>
+      listValuesForVersion(tx, created.version.id),
+    );
+    const pct = rows.find((r) => r.value.fieldKey === 'vacancy_rate')!;
+    const str = rows.find((r) => r.value.fieldKey === 'flag_text')!;
+    expect(pct.value.value).toBe('4.2');
+    expect(typeof pct.value.value).toBe('string');
+    expect(str.value.value).toBe('true');
+    expect(typeof str.value.value).toBe('string');
+
+    await withTx(ctx.appDb, (tx) =>
+      insertReview(
+        tx,
+        pct.value.id,
+        { decision: 'correct', correctedValue: '3.8' },
+        'req-jsonb-check',
+      ),
+    );
+    const updated = await withReadOnlyTx(ctx.appDb, (tx) =>
+      listValuesForVersion(tx, created.version.id),
+    );
+    const correctedPct = updated.find((r) => r.value.fieldKey === 'vacancy_rate')!;
+    expect(correctedPct.currentReview?.correctedValue).toBe('3.8');
+    expect(typeof correctedPct.currentReview?.correctedValue).toBe('string');
+  });
 });
