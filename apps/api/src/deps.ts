@@ -20,4 +20,5 @@ export interface ApiDeps {
   readonly db: AppDatabase;
   readonly blobStore: BlobStore;
   readonly enqueuer: ExtractionEnqueuer;
+  readonly redisPing?: () => Promise<void>;
 }

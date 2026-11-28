@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 import { seedDatabase } from '@app/db';
 import { withTemplateDb, type TemplateDbHandle } from '@app/db/testing';
 import { MemoryBlobStore } from '@app/storage';
@@ -35,27 +35,53 @@ export class RecordingEnqueuer implements ExtractionEnqueuer {
   }
 }
 
+export interface ApiTestHarnessOptions {
+  readonly existingCtx?: TemplateDbHandle;
+  readonly debugEndpoints?: boolean;
+  readonly throttleUploadLimit?: number;
+  readonly throttleReviewLimit?: number;
+  readonly throttleReadLimit?: number;
+}
+
 export interface ApiTestHarness {
   readonly ctx: TemplateDbHandle;
   readonly app: NestExpressApplication;
   readonly baseUrl: string;
   readonly blobStore: MemoryBlobStore;
   readonly enqueuer: RecordingEnqueuer;
+  setRedisHealthy(healthy: boolean): void;
   resetAndSeed(): Promise<void>;
   close(): Promise<void>;
 }
 
-export async function createApiTestHarness(): Promise<ApiTestHarness> {
-  const ctx = await withTemplateDb({ applyGrants: true });
+export async function createApiTestHarness(
+  options: ApiTestHarnessOptions = {},
+): Promise<ApiTestHarness> {
+  const ownsCtx = !options.existingCtx;
+  const ctx = options.existingCtx ?? (await withTemplateDb({ applyGrants: true }));
   const blobStore = new MemoryBlobStore();
   const enqueuer = new RecordingEnqueuer();
-  const config = loadApiConfig({ APP_ENV: 'test', API_PORT: '0' });
+  let redisHealthy = true;
+
+  const config = loadApiConfig({
+    APP_ENV: 'test',
+    API_PORT: '0',
+    DEBUG_ENDPOINTS: String(options.debugEndpoints ?? false),
+    THROTTLE_UPLOAD_LIMIT: String(options.throttleUploadLimit ?? 1000),
+    THROTTLE_REVIEW_LIMIT: String(options.throttleReviewLimit ?? 1000),
+    THROTTLE_READ_LIMIT: String(options.throttleReadLimit ?? 5000),
+  });
 
   const app = await createApiApp({
     config,
     db: ctx.appDb,
     blobStore,
     enqueuer,
+    redisPing: async () => {
+      if (!redisHealthy) {
+        throw new Error('redis down');
+      }
+    },
   });
   await app.listen(0, '127.0.0.1');
   const addr = app.getHttpServer().address() as AddressInfo;
@@ -67,6 +93,9 @@ export async function createApiTestHarness(): Promise<ApiTestHarness> {
     baseUrl,
     blobStore,
     enqueuer,
+    setRedisHealthy(healthy: boolean): void {
+      redisHealthy = healthy;
+    },
     async resetAndSeed(): Promise<void> {
       await ctx.reset();
       enqueuer.clear();
@@ -77,7 +106,9 @@ export async function createApiTestHarness(): Promise<ApiTestHarness> {
     },
     async close(): Promise<void> {
       await app.close();
-      await ctx.close();
+      if (ownsCtx) {
+        await ctx.close();
+      }
     },
   };
 }

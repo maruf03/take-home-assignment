@@ -31,6 +31,12 @@ async function bootstrap(): Promise<void> {
     db,
     blobStore,
     enqueuer: new BullExtractionEnqueuer(queue),
+    redisPing: async () => {
+      const pong = await redis.ping();
+      if (pong !== 'PONG') {
+        throw new Error(`Unexpected Redis PING reply: ${pong}`);
+      }
+    },
   });
   app.enableShutdownHooks();
   await app.listen(config.API_PORT, '0.0.0.0');

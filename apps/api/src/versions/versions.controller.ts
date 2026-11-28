@@ -20,23 +20,28 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ParseUuidPipe, ParseVersionNumberPipe } from '../common/id.pipes.js';
 import type { ReqLike, ResLike } from '../common/http.js';
 import { PaginatedInterceptor } from '../common/paginated.interceptor.js';
 import { PdfFilePipe, type PdfUpload } from '../common/pdf-file.pipe.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { UPLOAD_LIMITS } from '../documents/documents.controller.js';
+import { ThrottleGroup } from '../security/throttler.guard.js';
 import { VersionsService } from './versions.service.js';
 
 function asciiFallback(filename: string): string {
   return filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
 }
 
+@ApiTags('versions')
 @Controller('documents/:id/versions')
 export class VersionsController {
   constructor(@Inject(VersionsService) private readonly versions: VersionsService) {}
 
   @Post()
+  @ThrottleGroup('upload')
+  @ApiOperation({ summary: 'Upload a new PDF version for an existing document (with dedupe)' })
   @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS, defParamCharset: 'utf8' }))
   async create(
     @Param('id', new ParseUuidPipe()) id: string,

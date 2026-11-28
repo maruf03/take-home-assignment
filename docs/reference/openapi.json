@@ -1,0 +1,496 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/documents": {
+      "post": {
+        "operationId": "DocumentsController_create",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Upload a PDF and create a new document (queued for extraction)",
+        "tags": ["documents"]
+      },
+      "get": {
+        "operationId": "DocumentsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["documents"]
+      }
+    },
+    "/documents/facets": {
+      "get": {
+        "operationId": "DocumentsController_facets",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["documents"]
+      }
+    },
+    "/documents/{id}": {
+      "get": {
+        "operationId": "DocumentsController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["documents"]
+      }
+    },
+    "/documents/{id}/progress": {
+      "get": {
+        "operationId": "DocumentsController_progress",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["documents"]
+      }
+    },
+    "/documents/{id}/versions": {
+      "post": {
+        "operationId": "VersionsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Upload a new PDF version for an existing document (with dedupe)",
+        "tags": ["versions"]
+      },
+      "get": {
+        "operationId": "VersionsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}": {
+      "get": {
+        "operationId": "VersionsController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/values": {
+      "get": {
+        "operationId": "VersionsController_values",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/text": {
+      "get": {
+        "operationId": "VersionsController_text",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/file": {
+      "get": {
+        "operationId": "VersionsController_file",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/retry": {
+      "post": {
+        "operationId": "VersionsController_retry",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": ["versions"]
+      }
+    },
+    "/documents/{id}/versions/{n}/reextract": {
+      "post": {
+        "operationId": "VersionsController_reextract",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": ["versions"]
+      }
+    },
+    "/values/{id}/review": {
+      "post": {
+        "operationId": "ValuesController_review",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Approve or correct an extracted value on the reviewable version",
+        "tags": ["values"]
+      }
+    },
+    "/values/{id}/reviews": {
+      "get": {
+        "operationId": "ValuesController_reviews",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["values"]
+      }
+    },
+    "/document-types": {
+      "get": {
+        "operationId": "DocumentTypesController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List supported document types and their latest extraction templates",
+        "tags": ["document-types"]
+      }
+    },
+    "/documents/{id}/versions/{n}/runs": {
+      "get": {
+        "operationId": "RunsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List extraction runs for a document version",
+        "tags": ["runs"]
+      }
+    },
+    "/documents/{id}/versions/{n}/runs/{runId}/calls": {
+      "get": {
+        "operationId": "RunsController_calls",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "n",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List LLM calls for an extraction run (DEBUG_ENDPOINTS only)",
+        "tags": ["runs"]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Liveness probe (event-loop lag)",
+        "tags": ["health"]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Readiness probe (503 only if DB is down; Redis/S3 down -> 200 degraded)",
+        "tags": ["health"]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "MetricsController_metricsEndpoint",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Prometheus metrics exposition",
+        "tags": ["health"]
+      }
+    }
+  },
+  "info": {
+    "title": "Document Review API",
+    "description": "Document upload, structured LLM extraction, verbatim evidence review, and version carry-over API.",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "documents",
+      "description": ""
+    },
+    {
+      "name": "versions",
+      "description": ""
+    },
+    {
+      "name": "values",
+      "description": ""
+    },
+    {
+      "name": "document-types",
+      "description": ""
+    },
+    {
+      "name": "runs",
+      "description": ""
+    },
+    {
+      "name": "health",
+      "description": ""
+    }
+  ],
+  "servers": [],
+  "components": {
+    "schemas": {}
+  }
+}

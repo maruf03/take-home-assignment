@@ -13,6 +13,18 @@ const optionalNonEmptyString = z.preprocess(
   z.string().min(1).optional(),
 );
 
+const booleanString = z.preprocess((v) => {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') {
+    const lower = v.trim().toLowerCase();
+    if (lower === 'true' || lower === '1') return true;
+    if (lower === 'false' || lower === '0' || lower === '') return false;
+  }
+  return v;
+}, z.boolean());
+
+const logLevelSchema = z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']);
+
 /**
  * The API never receives LLM provider keys (apps/api/AGENTS.md): they are deliberately absent
  * from this schema, so they can never appear in the parsed config.
@@ -28,6 +40,12 @@ export const apiConfigSchema = z.object({
   S3_SECRET_KEY: optionalNonEmptyString,
   API_PORT: z.coerce.number().int().min(0).max(65_535).default(3000),
   MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  TRUST_PROXY_CIDR: z.string().trim().min(1).default('172.30.0.0/24'),
+  DEBUG_ENDPOINTS: booleanString.default(false),
+  THROTTLE_UPLOAD_LIMIT: z.coerce.number().int().min(1).default(10),
+  THROTTLE_REVIEW_LIMIT: z.coerce.number().int().min(1).default(120),
+  THROTTLE_READ_LIMIT: z.coerce.number().int().min(1).default(600),
+  LOG_LEVEL: logLevelSchema.default('info'),
 });
 
 export type ApiConfig = Readonly<z.output<typeof apiConfigSchema>>;
@@ -45,6 +63,12 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
     S3_SECRET_KEY: env['S3_SECRET_KEY'] ?? env['S3_SECRET_ACCESS_KEY'],
     API_PORT: env['API_PORT'],
     MAX_ATTEMPTS: env['MAX_ATTEMPTS'],
+    TRUST_PROXY_CIDR: env['TRUST_PROXY_CIDR'],
+    DEBUG_ENDPOINTS: env['DEBUG_ENDPOINTS'],
+    THROTTLE_UPLOAD_LIMIT: env['THROTTLE_UPLOAD_LIMIT'],
+    THROTTLE_REVIEW_LIMIT: env['THROTTLE_REVIEW_LIMIT'],
+    THROTTLE_READ_LIMIT: env['THROTTLE_READ_LIMIT'],
+    LOG_LEVEL: env['LOG_LEVEL'] ?? (env['APP_ENV'] === 'test' ? 'silent' : undefined),
   };
   if (!isProd) {
     effective['DATABASE_URL'] ??= DEV_DATABASE_URL;

@@ -18,11 +18,13 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ParseUuidPipe } from '../common/id.pipes.js';
 import type { ReqLike, ResLike } from '../common/http.js';
 import { PaginatedInterceptor } from '../common/paginated.interceptor.js';
 import { MAX_UPLOAD_BYTES, PdfFilePipe, type PdfUpload } from '../common/pdf-file.pipe.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { ThrottleGroup } from '../security/throttler.guard.js';
 import { DocumentsService } from './documents.service.js';
 
 export const UPLOAD_LIMITS = {
@@ -33,11 +35,14 @@ export const UPLOAD_LIMITS = {
   parts: 8,
 } as const;
 
+@ApiTags('documents')
 @Controller('documents')
 export class DocumentsController {
   constructor(@Inject(DocumentsService) private readonly documents: DocumentsService) {}
 
   @Post()
+  @ThrottleGroup('upload')
+  @ApiOperation({ summary: 'Upload a PDF and create a new document (queued for extraction)' })
   @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS, defParamCharset: 'utf8' }))
   async create(
     @UploadedFile(new PdfFilePipe()) upload: PdfUpload,

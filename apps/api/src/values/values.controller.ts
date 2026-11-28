@@ -16,17 +16,22 @@ import {
   Res,
   UseInterceptors,
 } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ParseUuidPipe } from '../common/id.pipes.js';
 import type { ReqLike, ResLike } from '../common/http.js';
 import { PaginatedInterceptor } from '../common/paginated.interceptor.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { ThrottleGroup } from '../security/throttler.guard.js';
 import { ValuesService } from './values.service.js';
 
+@ApiTags('values')
 @Controller('values')
 export class ValuesController {
   constructor(@Inject(ValuesService) private readonly values: ValuesService) {}
 
   @Post(':id/review')
+  @ThrottleGroup('review')
+  @ApiOperation({ summary: 'Approve or correct an extracted value on the reviewable version' })
   async review(
     @Param('id', new ParseUuidPipe()) id: string,
     @Body(new ZodValidationPipe(createReviewRequestSchema)) body: CreateReviewRequest,

@@ -29,6 +29,7 @@ import { ProblemError } from '../common/problem.js';
 import type { PdfUpload } from '../common/pdf-file.pipe.js';
 import { API_DEPS, type ApiDeps } from '../deps.js';
 import { storageKeyFor } from '../documents/documents.service.js';
+import { ApiMetricsService } from '../observability/metrics.service.js';
 import { toDocumentSummary, toVersionSummary } from '../views/presenters.js';
 import { ViewService } from '../views/view.service.js';
 
@@ -43,6 +44,7 @@ export class VersionsService {
   constructor(
     @Inject(API_DEPS) private readonly deps: ApiDeps,
     @Inject(ViewService) private readonly views: ViewService,
+    @Inject(ApiMetricsService) private readonly metrics: ApiMetricsService,
   ) {}
 
   async create(
@@ -80,7 +82,9 @@ export class VersionsService {
         versionNumber: result.version.versionNumber,
       };
     });
-    if (!committed.deduplicated) {
+    if (committed.deduplicated) {
+      this.metrics.incVersionDeduplicated();
+    } else {
       await this.deps.enqueuer.enqueue(committed.versionId, {
         trigger: 'upload',
         correlationId: requestId,

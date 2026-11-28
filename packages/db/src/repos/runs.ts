@@ -405,6 +405,19 @@ export async function listRuns(
   return toPage(rows, ks.limit, (row) => String(row.runNumber), fingerprint);
 }
 
+export async function getRunById(
+  tx: DbTx,
+  versionId: string,
+  runId: string,
+): Promise<ExtractionRunRow | null> {
+  const rows = await tx
+    .select()
+    .from(extractionRuns)
+    .where(and(eq(extractionRuns.versionId, versionId), eq(extractionRuns.id, runId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 const SWEEP_ADVISORY_LOCK_KEY = 7_120_001;
 
 /**

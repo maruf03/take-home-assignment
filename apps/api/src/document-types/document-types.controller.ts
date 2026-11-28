@@ -2,6 +2,7 @@ import type { DocumentTypeDto } from '@app/contracts/dto';
 import { listQuery, type Page } from '@app/contracts/page';
 import { listDocumentTypesWithTemplates, withReadOnlyTx } from '@app/db';
 import { Controller, Get, Inject, Injectable, Query, UseInterceptors } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import { PaginatedInterceptor } from '../common/paginated.interceptor.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
@@ -43,11 +44,13 @@ export class DocumentTypesService {
   }
 }
 
+@ApiTags('document-types')
 @Controller('document-types')
 export class DocumentTypesController {
   constructor(@Inject(DocumentTypesService) private readonly types: DocumentTypesService) {}
 
   @Get()
+  @ApiOperation({ summary: 'List supported document types and their latest extraction templates' })
   @UseInterceptors(PaginatedInterceptor)
   list(
     @Query(new ZodValidationPipe(listDocumentTypesQuerySchema, { kind: 'query' }))
