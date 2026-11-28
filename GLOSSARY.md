@@ -25,14 +25,14 @@ behaviour lives in the [design spec](docs/superpowers/specs/2026-11-27-document-
 | **Canonical evidence** | The full stored line(s) the chosen quote touches, normalized. This is what carry-over compares. |
 | **Weak line** | A canonical line with no letters left after removing the value tokens (for example a bare `$275.00`). This applies only to date, money, number and percent fields; it never carries alone. |
 | **Typed value** | The canonical JSON form: string, `YYYY-MM-DD`, `{amount, currency}`, or a canonical decimal string. |
-| **Review** | An append-only human decision on a value: `approve`, `correct` (with `corrected_value`, an annotation beside the extracted value) or `revert` (back to pending). |
+| **Review** | An append-only human decision on a value: `approve`, `correct` (with `corrected_value`, an annotation beside the extracted value), or `revert` (back to pending; supported in DB/core, deferred from HTTP API/UI in Core to Extended E1c). |
 | **Current review** | `extracted_values.current_review_id`, the projection that decides the review state. |
-| **Review state** | `pending` (no review, or a revert), `approved`, `corrected` or `carried_over`. These buckets are disjoint. |
+| **Review state** | `pending` (no review, or a revert in Extended E1c), `approved`, `corrected` or `carried_over`. These buckets are disjoint. |
 | **Effective value** | `correctedValue ?? value`. |
 | **Baseline** | For a new version, the highest earlier **extracted** version. Values are compared against it field by field. |
 | **Change kind** | `new`, `same` or `changed` versus the baseline, plus a `change_reason` when changed. Classification is independent of reviews. |
 | **Carry-over** | Copying the baseline's review (`origin='carried'`) onto a `same` value. Requires a non-revert baseline review. Defined by rule **A′**. |
 | **Attention** | Display grouping: `changed` → `gap` → `pending` → `done`. |
 | **Pending count** | `documents.pending_count`, an index key for the "needs review" filter. Progress shown to users is always computed from source rows. |
-| **Soft delete** | `documents.deleted_at`. Deleting revokes the fence on in-flight work. Every route under a deleted document returns 410. Restore re-queues the affected versions. |
-| **Idempotency key** | The client's `Idempotency-Key` header. It is stored with the resource in the same tx, and a replay returns the stored result. |
+| **Soft delete** | *(Extended E1a; schema columns and `getAliveDocumentOrThrow` 410 guard exist in Core, HTTP endpoints deferred)* `documents.deleted_at`. Deleting revokes the fence on in-flight work. Every route under a deleted document returns 410. Restore re-queues the affected versions. |
+| **Idempotency key** | *(Extended E1b; deferred from Core)* The client's `Idempotency-Key` header, stored with the resource in the same tx so a replay returns the stored result. |

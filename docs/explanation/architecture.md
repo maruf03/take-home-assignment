@@ -14,14 +14,16 @@ flowchart LR
   W -- claim / heartbeat / fenced writes --> PG
   W -- sweep re-enqueue --> R
   W --> P[[parse children: pdfjs]]
-  W --> LLM[[Anthropic]]
+  W --> LLM[[Gemini / Anthropic]]
+  M[migrate: Drizzle + seed] --> PG
+  M --> S3
 ```
 
 ## Who owns what
 | Store | Holds | If it's lost |
 |---|---|---|
-| **Postgres** | Documents, versions (status, lease, parsed text), runs, every LLM call, values, reviews, idempotency keys | It is the system of record and must be backed up |
-| **Redis** | "Work on version X soon" jobs | Rebuilt from Postgres by the sweep in ≤ 10s ([ADR-0001](../adr/0001-postgres-version-status-is-the-outbox.md)) |
+| **Postgres** | Documents, versions (status, lease, parsed text), runs, every LLM call, values, reviews *(plus `idempotency_keys` in Extended E1b)* | It is the system of record and must be backed up |
+| **Redis** | "Work on version X soon" jobs | Rebuilt from Postgres by the sweep (`≤ 10s` for `enqueued_at IS NULL`, `≤ 20s` for cooled-down `queued` rows, `≤ 40s` for expired `extracting` leases; [ADR-0001](../adr/0001-postgres-version-status-is-the-outbox.md)) |
 | **S3** | Immutable PDF bytes, content-addressed | Needed only for the first parse and downloads; evidence uses the stored parsed text |
 
 ## Lifecycle of one upload
@@ -30,7 +32,7 @@ flowchart LR
 3. The worker parses the PDF in a child process, and checkpoints the parsed text.
 4. The worker calls the LLM and checkpoints the raw response **before** validating it.
 5. The worker validates the evidence and finalizes under the document lock. Carry-over (rule A′) runs here, and the reviewable pointer moves.
-6. The reviewer approves, corrects or reverts. Reviews are append-only.
+6. The reviewer approves or corrects (`revert` is deferred to Extended E1c). Reviews are append-only.
 
 Failures are states: `failed` plus a code, always retryable by a human. Crashes, zombie workers,
 Redis flushes and concurrent new versions are handled by the fencing token, the sweep and the

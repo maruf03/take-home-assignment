@@ -24,14 +24,14 @@ Refs: docs/superpowers/plans/2026-11-27-core-tier.md#task-3a · R4, I10
 - **No temporary artifacts in commits:** spikes, probes, experiments and scratch scripts stay out of the repo. Record their findings in `docs/history/` and fold verified facts into the spec.
 - Keep commits small and focused. Tests ship in the same commit as the code they cover. Never commit secrets, `.env` or session logs (`*.jsonl`).
 - **Scope is optional** (`scope-empty` is not enforced). Omit it for repo-wide changes (`docs: …`, `chore: …`); when present it must come from the list above (`scope-enum`).
-- Enforcement: **commitlint** (`@commitlint/config-conventional` plus the scope list above) runs in the lefthook `commit-msg` hook and again in CI on the PR title.
+- Enforcement: **commitlint** (`@commitlint/config-conventional` plus the scope list above) runs in the lefthook `commit-msg` hook.
 
-## Hooks (lefthook; installed with Core Task 1)
+## Hooks (lefthook; installed via `pnpm prepare`)
 | Hook | Runs |
 |---|---|
 | `pre-commit` | Prettier and ESLint on staged files (`--no-warn-ignored`), and `pnpm db:check` if `packages/db/src/schema` changed |
 | `commit-msg` | commitlint, plus a check that rejects AI/agent attribution trailers (`Co-Authored-By:` naming an AI tool, "Generated with") |
-| `pre-push` | `pnpm typecheck test` |
+| `pre-push` | `pnpm typecheck && pnpm test` |
 
 Skip a hook only with a stated reason in the PR. Never skip one to land red code.
 

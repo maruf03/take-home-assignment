@@ -20,23 +20,20 @@ every doc is mapped in [`docs/INDEX.md`](docs/INDEX.md).
 
 ## Commands
 
-> **Status:** scaffolding is in progress (Core tier, Task 1). The commands below are the planned
-> interface, and become real as each task lands.
-
 | Command | What it does |
 |---|---|
 | `corepack enable && pnpm install` | Install (pnpm 12, Node 24, see `.nvmrc`) |
 | `docker compose up --build` | Full stack for evaluators: postgres, redis, seaweedfs, migrate+seed, api :3000, worker, web :8080 |
-| `pnpm infra` then `pnpm dev` | Infra in Docker, apps on the host with watch mode |
+| `pnpm dev` | Apps on the host with watch mode (start `postgres redis s3 migrate` via compose first) |
 | `pnpm lint` · `pnpm typecheck` · `pnpm build` | Turbo tasks across the workspace |
 | `pnpm test` | Unit tests (pure, fast, cached) |
-| `pnpm test:int` · `pnpm test:chaos` | Integration and chaos tests (need `pnpm infra`) |
-| `pnpm test:e2e` | Playwright against the compose e2e overlay |
+| `pnpm test:int` · `pnpm chaos` | Integration tests (`postgres`, `redis`, `s3`) and chaos tests (`compose.test.yaml` `redis-chaos`) |
+| `pnpm test:e2e` | Playwright against an already-running `compose.yaml` + `compose.e2e.yaml` stack on `:8080` |
 | `pnpm db:generate` · `pnpm db:check` | Generate Drizzle migrations, and the drift guard |
 | `pnpm golden:update` · `pnpm cassettes:record` | Refresh golden text, and record LLM cassettes (needs a key) |
 | `pnpm trace:check` | Check that every requirement ID in `docs/reference/traceability.md` has a passing test |
 
-Run `pnpm lint typecheck test` before saying a change is done. Run `pnpm test:int` if you
+Run `pnpm lint && pnpm typecheck && pnpm test` before saying a change is done. Run `pnpm test:int` if you
 touched `packages/db`, `apps/worker` or `apps/api`.
 
 ## Repo map
@@ -45,10 +42,10 @@ touched `packages/db`, `apps/worker` or `apps/api`.
 apps/api        NestJS (ESM, SWC) HTTP API      apps/worker   Nest app: BullMQ processor, sweep, parse pool
 apps/web        Vite + React SPA (nginx)         packages/core PURE extraction logic (no IO)
 packages/contracts zod schemas + typed-value helpers shared with web
-packages/db     Drizzle schema, generated migrations, repositories, grants, seed
+packages/db     Drizzle schema, generated migrations, repositories, grants, seed, testing helpers
 packages/pdf    pdfjs line builder + child-process parse entry
-packages/llm    LlmProvider (anthropic, fake, cassette)
-packages/storage S3 BlobStore   packages/testkit test builders/fakes   packages/config shared configs
+packages/llm    LlmProvider (gemini, anthropic, fake, fake-ipc, cassette)
+packages/storage S3 BlobStore   packages/testkit test placeholder   packages/config shared configs
 fixtures/       PROVIDED, READ-ONLY      fixtures-golden/  our goldens, cassettes, crafted PDFs
 docs/           see docs/INDEX.md
 ```
@@ -62,13 +59,13 @@ docs/           see docs/INDEX.md
    - `web` imports only `contracts`.
    - `db`, `pdf`, `llm` and `storage` never import Nest.
    - Raw `documents` queries are allowed only inside `packages/db`. Use `getAliveDocument()` and the `alive` predicate.
-5. **Lock order** is `idempotency_keys → documents → document_versions → extraction_runs → llm_calls → extracted_values → reviews`. Never take locks out of order or upgrade one. Every worker write is fenced with `WHERE active_run_id = $me`.
+5. **Lock order** is `(idempotency_keys in Extended E1b →) documents → document_versions → extraction_runs → llm_calls → extracted_values → reviews`. Never take locks out of order or upgrade one. Active-run worker writes are fenced with `WHERE active_run_id = $me` (`claimVersion` locks `document_versions` directly; `sweepBootRelease`/`sweepExpired` release stale leases).
 6. **Postgres `now()` is the only clock** for leases, sweeps and `updated_at`. Never use `$onUpdate` or app time in SQL predicates.
 7. **The verbatim-evidence rule:** a value without a quote that appears in the version's own `parsed_text` is a gap. Never keep a value whose evidence failed validation.
 8. **Every requirement keeps a test.** IDs `[R#]` and `[I#]` are listed in `docs/reference/traceability.md`. Name tests with them. Never delete or quarantine a matrix test.
-9. **Secrets:** only the worker gets the LLM key (`GEMINI_API_KEY` by default, or `ANTHROPIC_API_KEY`; `LLM_PROVIDER` picks the provider). Never log prompts, parsed text or keys. Fake and cassette LLM providers run only with `APP_ENV=test`.
-10. **ESM everywhere:** use `import.meta.dirname`, not `__dirname`. Packages use `nodenext` with `.js` relative imports. Nest apps use SWC with `moduleResolution: bundler`. Avoid module cycles.
-11. **Keyset pagination only**, on immutable unique keys (uuidv7 `id`). No offset, no totals (`/documents/facets` is the single capped exception). Never use Drizzle `.desc()` on an index.
+9. **Secrets:** only the worker gets the LLM key (`GEMINI_API_KEY` by default, or `ANTHROPIC_API_KEY`; `LLM_PROVIDER` picks the provider). Never log prompts, parsed text or keys. `fake`, `fake-ipc`, and `cassette` LLM providers run only with `APP_ENV=test`.
+10. **ESM everywhere:** use `import.meta.dirname`, not `__dirname`. Packages use `nodenext` with `.js` relative imports. Nest apps use `@swc/cli` with `moduleResolution: bundler`. Avoid module cycles.
+11. **Keyset pagination only**, on immutable unique keys (`uuidv7` `id` on `/documents` and `/reviews`; `versionNumber`, `runNumber`, `seq`, `position`, `key` on nested/type lists). No offset, no totals (`/documents/facets` is the single capped exception). Never use Drizzle `.desc()` on an index.
 12. **LLM schemas** must have no nullable or union types (use sentinels) and no `maxItems`, `minLength` or `maximum`; zod enforces those bounds. Store raw provider bodies before validation. For Anthropic, use `.asResponse()`.
 13. **Scope:** build the Core tier before anything in the Extended tier (spec §15.3). The Core cutoff is **Sat 28 Nov 2026 16:00 UTC**.
 
@@ -82,7 +79,7 @@ docs/           see docs/INDEX.md
 | Domain terms | `GLOSSARY.md` | add terms as they're resolved; use them in code and docs |
 | Operational procedures | `docs/runbooks/` | symptom → diagnosis → fix |
 | Task guides | `docs/how-to/` | step-by-step |
-| Reference (API, schema, codes, config, traceability) | `docs/reference/` | |
+| Reference (`openapi.json`, `traceability.md`) | `docs/reference/` | |
 | Superseded plans | `docs/history/` | never edited |
 
 Update the spec when behaviour changes. Add an ADR when you make a surprising trade-off. Keep

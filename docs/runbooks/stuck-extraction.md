@@ -6,11 +6,11 @@
 `queued` rows with `enqueued_at IS NULL` or older than 10s are re-enqueued. Recovery should take at most about 40s.
 
 **Diagnose**
-1. Worker alive? `curl -fsS 127.0.0.1:3001/health/live` (from inside the worker container network) should return 200.
+1. Worker alive? `docker compose exec worker node -e "fetch('http://127.0.0.1:3001/health/live').then(r=>r.text()).then(console.log)"` (port via `WORKER_HTTP_PORT`; `curl` is not in the slim image) should return 200.
    The response reports the age of the last sweep tick.
 2. Row state:
    `SELECT status, attempts, run_seq, lease_until, worker_id, enqueued_at, last_error_code FROM document_versions WHERE id = '<uuid>';`
-3. Redis job: `docker compose exec redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning keys 'bull:extraction:*<uuid>*'`.
+3. Redis job: `docker compose exec redis redis-cli keys 'bull:extraction:*<uuid>*'` (or `-a "${REDIS_PASSWORD:-dev-redis}"`).
 
 **Fix**
 - Worker down → `docker compose up -d worker`. On boot it releases its own leases and sweeps.
