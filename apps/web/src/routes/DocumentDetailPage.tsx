@@ -28,6 +28,7 @@ import { ErrorBoundary } from '../shared/ui/ErrorBoundary.js';
 import {
   Badge,
   Banner,
+  ModalDialog,
   ProgressBar,
   SkeletonRow,
   type BadgeTone,
@@ -222,7 +223,7 @@ function DocumentDetailContent({
     fieldKey: string;
     label: string;
     actionLabel: string;
-    reviewId: string | null;
+    reviewId: string;
   } | null>(null);
   const [editingFieldKey, setEditingFieldKey] = useState<string | null>(null);
   const [draftsByField, setDraftsByField] = useState<Record<string, CorrectionDraft>>({});
@@ -322,13 +323,15 @@ function DocumentDetailContent({
       {
         onSuccess: (res) => {
           setLiveNotice(`Approved ${val.label}`);
-          setUndoToast({
-            valueId: val.id,
-            fieldKey: val.fieldKey,
-            label: val.label,
-            actionLabel: 'Approved',
-            reviewId: res.value.review?.id ?? null,
-          });
+          if (!res.noop && res.value.review) {
+            setUndoToast({
+              valueId: val.id,
+              fieldKey: val.fieldKey,
+              label: val.label,
+              actionLabel: 'Approved',
+              reviewId: res.value.review.id,
+            });
+          }
           focusNextPendingAfter();
         },
         onError: (err) => {
@@ -367,12 +370,7 @@ function DocumentDetailContent({
     });
   };
 
-  const handleRevert = (
-    valueId: string,
-    fieldKey: string,
-    label: string,
-    reviewId: string | null,
-  ) => {
+  const handleRevert = (valueId: string, fieldKey: string, label: string, reviewId: string) => {
     setUndoToast(null);
     reviewMutation.mutate(
       {
@@ -417,15 +415,21 @@ function DocumentDetailContent({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isEditableTarget(event.target)) return;
+      if (shortcutsHelpOpen || uploadVersionOpen) return;
 
       if (event.key === '?') {
         event.preventDefault();
-        setShortcutsHelpOpen((prev) => !prev);
+        setShortcutsHelpOpen(true);
         return;
       }
-      if (event.key === 'Escape' && shortcutsHelpOpen) {
+      if (event.key === 'u' && undoToast) {
         event.preventDefault();
-        setShortcutsHelpOpen(false);
+        handleRevert(undoToast.valueId, undoToast.fieldKey, undoToast.label, undoToast.reviewId);
+        return;
+      }
+      if (event.key === 'v') {
+        event.preventDefault();
+        setDoneExpanded((prev) => !prev);
         return;
       }
       if (navigableValues.length === 0) return;
@@ -469,8 +473,11 @@ function DocumentDetailContent({
       }
 
       if (!selectedValue) return;
+      const canAct =
+        selectedValue.reviewable && !reviewMutation.pendingValueIds.has(selectedValue.id);
       if (
         event.key === 'a' &&
+        canAct &&
         selectedValue.kind !== 'gap' &&
         selectedValue.reviewState !== 'approved'
       ) {
@@ -478,18 +485,21 @@ function DocumentDetailContent({
         handleApprove(selectedValue);
       } else if (
         event.key === 'g' &&
+        canAct &&
         selectedValue.kind === 'gap' &&
         selectedValue.reviewState === 'pending'
       ) {
         event.preventDefault();
         handleApprove(selectedValue);
-      } else if (event.key === 'c') {
+      } else if (event.key === 'c' && canAct) {
         event.preventDefault();
         handleStartEdit(selectedValue);
       } else if (event.key === 'e' && selectedValue.evidence) {
         event.preventDefault();
         document
-          .querySelector<HTMLElement>('#text-pane, mark[data-active-evidence="true"]')
+          .querySelector<HTMLElement>(
+            '[data-testid="active-evidence-mark"], [aria-label="Document source text"]',
+          )
           ?.scrollIntoView({
             block: 'center',
           });
@@ -661,7 +671,21 @@ function DocumentDetailContent({
 
             <button
               type="button"
-              onClick={() => setFreezeOrderEnabled((prev) => !prev)}
+              onClick={() => {
+                setFreezeOrderEnabled((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    const nextBuckets: Record<string, ValueGroup['id']> = {};
+                    for (const v of values) {
+                      nextBuckets[v.id] = v.attention;
+                    }
+                    setFrozenOrder({ version: activeVersionNumber, buckets: nextBuckets });
+                  } else {
+                    setFrozenOrder(null);
+                  }
+                  return next;
+                });
+              }}
               aria-pressed={freezeOrderEnabled}
               className="inline-flex min-h-8 items-center rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-subtle)]"
             >
@@ -985,13 +1009,15 @@ function DocumentDetailContent({
                                       });
                                       handleCancelEdit(item.fieldKey);
                                       setLiveNotice(`Corrected ${item.label}`);
-                                      setUndoToast({
-                                        valueId: item.id,
-                                        fieldKey: item.fieldKey,
-                                        label: item.label,
-                                        actionLabel: 'Corrected',
-                                        reviewId: res.value.review?.id ?? null,
-                                      });
+                                      if (!res.noop && res.value.review) {
+                                        setUndoToast({
+                                          valueId: item.id,
+                                          fieldKey: item.fieldKey,
+                                          label: item.label,
+                                          actionLabel: 'Corrected',
+                                          reviewId: res.value.review.id,
+                                        });
+                                      }
                                       focusNextPendingAfter();
                                     } catch (err) {
                                       if (
@@ -1095,43 +1121,30 @@ function DocumentDetailContent({
         </div>
       ) : null}
 
-      {shortcutsHelpOpen ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Keyboard shortcuts"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-        >
-          <div className="w-full max-w-md rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-[var(--color-ink)]">
-                Keyboard shortcuts
-              </h2>
-              <button
-                type="button"
-                onClick={() => setShortcutsHelpOpen(false)}
-                className="rounded border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-ink)]"
-              >
-                Close
-              </button>
-            </div>
-            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-              <dt className="font-mono font-semibold">j / k</dt>
-              <dd>Move to next / previous row</dd>
-              <dt className="font-mono font-semibold">a / g</dt>
-              <dd>Approve value / confirm gap not present</dd>
-              <dt className="font-mono font-semibold">c</dt>
-              <dd>Open inline correction editor</dd>
-              <dt className="font-mono font-semibold">n</dt>
-              <dd>Jump to next group</dd>
-              <dt className="font-mono font-semibold">e</dt>
-              <dd>Scroll to evidence in source text</dd>
-              <dt className="font-mono font-semibold">?</dt>
-              <dd>Toggle this help dialog</dd>
-            </dl>
-          </div>
-        </div>
-      ) : null}
+      <ModalDialog
+        open={shortcutsHelpOpen}
+        title="Keyboard shortcuts"
+        onClose={() => setShortcutsHelpOpen(false)}
+      >
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+          <dt className="font-mono font-semibold">j / k</dt>
+          <dd>Move to next / previous row</dd>
+          <dt className="font-mono font-semibold">a / g</dt>
+          <dd>Approve value / confirm gap not present</dd>
+          <dt className="font-mono font-semibold">c</dt>
+          <dd>Open inline correction editor</dd>
+          <dt className="font-mono font-semibold">u</dt>
+          <dd>Undo last review while toast is visible</dd>
+          <dt className="font-mono font-semibold">n</dt>
+          <dd>Jump to next group</dd>
+          <dt className="font-mono font-semibold">v</dt>
+          <dd>Toggle Done group</dd>
+          <dt className="font-mono font-semibold">e</dt>
+          <dd>Scroll to evidence in source text</dd>
+          <dt className="font-mono font-semibold">?</dt>
+          <dd>Open this help dialog</dd>
+        </dl>
+      </ModalDialog>
     </div>
   );
 }

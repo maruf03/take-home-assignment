@@ -55,7 +55,7 @@ export const createReviewRequestSchema = z.discriminatedUnion('decision', [
     .object({
       decision: z.literal('revert'),
       note: reviewNoteInputSchema,
-      expectedCurrentReviewId: expectedCurrentReviewIdSchema,
+      expectedCurrentReviewId: uuidSchema,
     })
     .strict(),
 ]);

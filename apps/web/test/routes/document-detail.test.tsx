@@ -322,6 +322,14 @@ describe('DocumentDetailPage, TextPane, PDF download, and polling', () => {
       expectedCurrentReviewId: '01950000-0000-7000-8000-000000000888',
     });
 
+    // Shortcuts are inert inside <input> (typing 'a' in note input does NOT fire approve)
+    await user.keyboard('c');
+    const noteInput = await screen.findByLabelText(/Note/i);
+    await user.click(noteInput);
+    await user.keyboard('a');
+    expect(requests).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
     // Toggle shortcuts off -> pressing 'a' no longer triggers approve
     await user.click(screen.getByRole('button', { name: /Shortcuts: On/i }));
     expect(screen.getByRole('button', { name: /Shortcuts: Off/i })).toBeInTheDocument();

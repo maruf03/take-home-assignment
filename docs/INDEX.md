@@ -47,7 +47,7 @@ agents start with [AGENTS.md](../AGENTS.md).
 | [0008](adr/0008-strict-tool-schema-with-sentinels.md) | Strict tool schema with sentinels |
 | [0009](adr/0009-esm-everywhere-nest-swc-bundler.md) | ESM everywhere; Nest via SWC + bundler resolution |
 | [0010](adr/0010-keyset-pagination-on-uuidv7.md) | Keyset pagination on uuidv7 |
-| [0011](adr/0011-review-revert-is-an-append-only-decision.md) | Undo is a revert review *(Extended E1c)* |
+| [0011](adr/0011-review-revert-is-an-append-only-decision.md) | Undo is a revert review |
 | [0012](adr/0012-pdf-original-rendered-with-pdfjs-canvas.md) | Original PDF via pdf.js canvas *(Extended E1c)* |
 
 ## Reference

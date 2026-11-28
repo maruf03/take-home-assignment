@@ -112,6 +112,32 @@ describe('[I4] Forward pagination model and cursor validation', () => {
       }
     }
 
+    class PrevPageCmd implements fc.AsyncCommand<Model, Real> {
+      check(m: Model): boolean {
+        return m.cursor !== null;
+      }
+
+      async run(m: Model): Promise<void> {
+        const res = await fetch(
+          `${h.baseUrl}/documents?type=invoice&limit=${m.limit}&cursor=${encodeURIComponent(m.cursor!)}`,
+        );
+        expect(res.status).toBe(200);
+        const page = pageSchema(documentSummaryDtoSchema).parse(await res.json());
+        if (page.page.prevCursor) {
+          const backRes = await fetch(
+            `${h.baseUrl}/documents?type=invoice&limit=${m.limit}&cursor=${encodeURIComponent(page.page.prevCursor)}`,
+          );
+          expect(backRes.status).toBe(200);
+          const backPage = pageSchema(documentSummaryDtoSchema).parse(await backRes.json());
+          expect(backPage.data.map((d) => d.id)).not.toEqual([]);
+        }
+      }
+
+      toString(): string {
+        return 'PrevPage';
+      }
+    }
+
     class InsertDocCmd implements fc.AsyncCommand<Model, Real> {
       check(): boolean {
         return true;
@@ -131,9 +157,16 @@ describe('[I4] Forward pagination model and cursor validation', () => {
     await fc.assert(
       fc.asyncProperty(
         fc.integer({ min: 1, max: 3 }),
-        fc.commands([fc.constant(new NextPageCmd()), fc.constant(new InsertDocCmd())], {
-          maxCommands: 12,
-        }),
+        fc.commands(
+          [
+            fc.constant(new NextPageCmd()),
+            fc.constant(new PrevPageCmd()),
+            fc.constant(new InsertDocCmd()),
+          ],
+          {
+            maxCommands: 12,
+          },
+        ),
         async (limit, cmds) => {
           await h.resetAndSeed();
           const baselineIds = new Set<string>();

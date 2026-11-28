@@ -78,10 +78,10 @@ export function applyOptimisticReview(
       ? 'corrected'
       : 'approved';
   const nextAttention: ValueViewDto['attention'] = isRevert
-    ? existing.kind === 'gap'
-      ? 'gap'
-      : existing.changeKind === 'changed'
-        ? 'changed'
+    ? existing.changeKind === 'changed'
+      ? 'changed'
+      : existing.kind === 'gap'
+        ? 'gap'
         : 'pending'
     : 'done';
   const nextEffective =

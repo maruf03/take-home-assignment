@@ -50,7 +50,7 @@ describe('scripts/trace-check.ts CLI', () => {
       .filter((m): m is RegExpExecArray => m !== null && !/\*\*\(Extended\b/i.test(m[2]!))
       .map((m) => m[1]!);
 
-    expect(coreIds.length).toBe(21);
+    expect(coreIds.length).toBe(22);
 
     const xml = `<testsuites><testsuite name="core">${coreIds
       .map((id) => `<testcase classname="suite" name="[${id}] passes cleanly" />`)

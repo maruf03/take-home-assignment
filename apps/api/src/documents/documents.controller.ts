@@ -81,7 +81,9 @@ export class DocumentsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List alive documents with forward keyset pagination and filters' })
+  @ApiOperation({
+    summary: 'List alive documents with bidirectional keyset pagination and filters',
+  })
   @ApiQuery({ name: 'type', required: false, type: String })
   @ApiQuery({ name: 'needsReview', required: false, type: Boolean })
   @ApiQuery({

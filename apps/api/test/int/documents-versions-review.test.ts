@@ -776,11 +776,25 @@ describe('API Core Task 9 integration: upload, documents, versions, values, revi
     expect(approved.value.reviewState).toBe('approved');
     expect(approved.progress.pending).toBe(2);
 
+    // Missing expectedCurrentReviewId on revert -> 400 VALIDATION_FAILED
+    const missingExpectedRes = await fetch(`${h.baseUrl}/values/${vendor.id}/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'revert' }),
+    });
+    expect(missingExpectedRes.status).toBe(400);
+    expect(problemDetailsSchema.parse(await missingExpectedRes.json()).code).toBe(
+      'VALIDATION_FAILED',
+    );
+
     // Stale expectedCurrentReviewId on revert -> 409 REVIEW_CONFLICT
     const staleRevertRes = await fetch(`${h.baseUrl}/values/${vendor.id}/review`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ decision: 'revert', expectedCurrentReviewId: null }),
+      body: JSON.stringify({
+        decision: 'revert',
+        expectedCurrentReviewId: '01950000-0000-7000-8000-000000000000',
+      }),
     });
     expect(staleRevertRes.status).toBe(409);
     expect(problemDetailsSchema.parse(await staleRevertRes.json()).code).toBe('REVIEW_CONFLICT');
