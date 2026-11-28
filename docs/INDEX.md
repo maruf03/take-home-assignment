@@ -12,7 +12,7 @@ agents start with [AGENTS.md](../AGENTS.md).
 ## Start here
 | Doc | For | Status |
 |---|---|---|
-| [README.md](../README.md) | What it is, how to run it, decisions, cuts | ✅ (filled in as Core lands) |
+| [README.md](../README.md) | What it is, how to run it, decisions, cuts | ✅ |
 | [BRIEF.md](../BRIEF.md) | The original assignment brief, verbatim | ✅ |
 | [AGENTS.md](../AGENTS.md) / [CLAUDE.md](../CLAUDE.md) | Agent instructions, commands, non-negotiables | ✅ |
 | [GLOSSARY.md](../GLOSSARY.md) | Domain language | ✅ |
@@ -42,19 +42,20 @@ agents start with [AGENTS.md](../AGENTS.md).
 | [0003](adr/0003-carry-over-rule-a-prime.md) | Carry-over rule A′ |
 | [0004](adr/0004-jsonb-values-with-shape-checks-generated-migrations.md) | jsonb + shape CHECKs; generated migrations only |
 | [0005](adr/0005-db-privileges-enforce-append-only-and-no-delete.md) | DB privileges enforce append-only and no delete |
-| [0006](adr/0006-soft-delete-aggregate-root-410.md) | Soft delete on the aggregate root; 410 |
+| [0006](adr/0006-soft-delete-aggregate-root-410.md) | Soft delete on the aggregate root; 410 *(Extended E1a)* |
 | [0007](adr/0007-parse-in-child-process-pool.md) | Child-process parse pool + RSS watchdog |
 | [0008](adr/0008-strict-tool-schema-with-sentinels.md) | Strict tool schema with sentinels |
 | [0009](adr/0009-esm-everywhere-nest-swc-bundler.md) | ESM everywhere; Nest via SWC + bundler resolution |
 | [0010](adr/0010-keyset-pagination-on-uuidv7.md) | Keyset pagination on uuidv7 |
-| [0011](adr/0011-review-revert-is-an-append-only-decision.md) | Undo is a revert review |
-| [0012](adr/0012-pdf-original-rendered-with-pdfjs-canvas.md) | Original PDF via pdf.js canvas |
+| [0011](adr/0011-review-revert-is-an-append-only-decision.md) | Undo is a revert review *(Extended E1c)* |
+| [0012](adr/0012-pdf-original-rendered-with-pdfjs-canvas.md) | Original PDF via pdf.js canvas *(Extended E1c)* |
 
 ## Reference
 | Doc | Status |
 |---|---|
 | [traceability.md](reference/traceability.md): requirement → tests | ✅ |
-| api.md + openapi.json (generated from contracts) | 🧭 Extended E1d |
+| [openapi.json](reference/openapi.json): OpenAPI spec generated from API Swagger decorators | ✅ |
+| api.md (human-friendly API guide) | 🧭 Extended E1d |
 | schema.md (tables, constraints, grants) | 🧭 Extended E1d |
 | error-codes.md (problem codes, version failure codes, gap codes, change reasons, UI copy) | 🧭 Extended E1d |
 | configuration.md (every env var, default, and production denylist) | 🧭 Extended E1d |
@@ -62,7 +63,7 @@ agents start with [AGENTS.md](../AGENTS.md).
 ## How-to
 | Doc | Status |
 |---|---|
-| [local-development.md](how-to/local-development.md) | ✅ (commands go live in Core Task 1) |
+| [local-development.md](how-to/local-development.md) | ✅ |
 | [git-workflow.md](how-to/git-workflow.md): branches, Conventional Commits, PRs, hooks | ✅ |
 | testing.md (tiers, isolation, fakes, chaos) | 🧭 Extended E1d |
 | update-goldens.md | 🧭 Extended E1d |
