@@ -1,0 +1,30 @@
+# End-to-end Playwright overlay (spec §10.5, §11.6, Core Task 12).
+# Layered on top of compose.yaml (application services land in Core Task 13):
+#   docker compose -f compose.yaml -f compose.e2e.yaml up --wait
+# Runs APP_ENV=test with deterministic Gemini cassette replay, fast lease/poll
+# cadence, and raised API throttles so Playwright journeys run fast without 429s.
+
+services:
+  api:
+    environment:
+      APP_ENV: test
+      DEBUG_ENDPOINTS: 'false'
+      THROTTLE_UPLOAD_LIMIT: '1000'
+      THROTTLE_REVIEW_LIMIT: '1000'
+      THROTTLE_READ_LIMIT: '5000'
+
+  worker:
+    environment:
+      APP_ENV: test
+      LLM_PROVIDER: cassette
+      LLM_MODEL: gemini-3.5-flash
+      CASSETTES_DIR: /app/fixtures-golden/cassettes
+      LLM_LIMIT_MAX: '100'
+      LLM_LIMIT_DURATION_MS: '1000'
+      LEASE_SECONDS: '5'
+      HEARTBEAT_INTERVAL_MS: '1000'
+      SWEEP_INTERVAL_MS: '1000'
+      SWEEP_COOLDOWN_SECONDS: '1'
+      MAX_ATTEMPTS: '3'
+    volumes:
+      - ./fixtures-golden/cassettes:/app/fixtures-golden/cassettes:ro

@@ -13,10 +13,10 @@ import { FIELD_KEY_REGEX_SOURCE } from '@app/contracts/values';
 import { sql } from 'drizzle-orm';
 import {
   check,
+  customType,
   foreignKey,
   index,
   integer,
-  jsonb,
   pgTable,
   type PgTableExtraConfigValue,
   text,
@@ -26,6 +26,25 @@ import {
 } from 'drizzle-orm/pg-core';
 import { inList, sqlRegex, sqlTextArray, valueShapeSql } from '../sql/value-shape.js';
 import { documentVersions, extractionRuns } from './documents.js';
+
+/**
+ * Custom jsonb column for TypedValue (`string | { amount, currency }`).
+ * Drizzle's built-in `jsonb()` calls `JSON.parse()` on any string returned by the driver,
+ * double-parsing node-postgres's already-parsed JSONB strings (turning `"4.2"` into number `4.2`
+ * or `"true"` into boolean `true`). Passing the parsed driver value through verbatim preserves
+ * canonical decimal and string values cleanly with zero SQL schema drift.
+ */
+const typedValueJsonb = customType<{ data: unknown; driverData: unknown }>({
+  dataType() {
+    return 'jsonb';
+  },
+  toDriver(value: unknown): unknown {
+    return value === null || value === undefined ? value : JSON.stringify(value);
+  },
+  fromDriver(value: unknown): unknown {
+    return value;
+  },
+});
 
 export const extractedValues = pgTable(
   'extracted_values',
@@ -42,7 +61,7 @@ export const extractedValues = pgTable(
     fieldKey: text('field_key').notNull(),
     fieldType: text('field_type').notNull(),
     kind: text('kind').notNull(),
-    value: jsonb('value'),
+    value: typedValueJsonb('value'),
     rawValue: text('raw_value'),
     evidence: text('evidence'),
     attemptedQuote: text('attempted_quote'),
@@ -131,7 +150,7 @@ export const reviews = pgTable(
     valueId: uuid('value_id').notNull(),
     fieldType: text('field_type').notNull(),
     decision: text('decision').notNull(),
-    correctedValue: jsonb('corrected_value'),
+    correctedValue: typedValueJsonb('corrected_value'),
     note: text('note'),
     origin: text('origin').notNull(),
     carriedFromReviewId: uuid('carried_from_review_id'),

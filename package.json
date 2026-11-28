@@ -14,7 +14,9 @@
     "test": "turbo run test",
     "test:int": "turbo run test:int",
     "test:chaos": "turbo run test:chaos",
-    "test:e2e": "echo 'e2e tests are added in Core Task 12' && exit 1",
+    "test:e2e": "playwright test",
+    "trace:check": "node scripts/trace-check.ts",
+    "chaos": "bash scripts/chaos.sh",
     "dev": "turbo run dev",
     "infra": "docker compose -f compose.yaml -f compose.dev.yaml up -d --wait",
     "infra:down": "docker compose -f compose.yaml -f compose.dev.yaml down",
@@ -31,9 +33,11 @@
     "prepare": "lefthook install || true"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.1",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^24.19.4",
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.9",
